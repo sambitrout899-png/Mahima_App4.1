@@ -1,10 +1,13 @@
-import React, { useEffect, useRef, useState } from "react";
+﻿import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { googleLogin, login, register } from "../../utils/fetch-auth-shim";
+import { googleLogin, login, mfaLoginVerify, register, persistSharedAuthToken } from "../../utils/fetch-auth-shim";
+import { clearSharedAuthToken } from "../../utils/sharedAuthCookie";
 import { API_BASE } from "../../api";
 import mahimaLogo from "../../assets/mahima-logo.png";
 import { initNativeApp, flushPendingFcmToken, ensurePushTokenRegistered } from "../../utils/initNativeApp";
 import { registerMobilePushNotifications } from "../../utils/mobilePushNotifications";
+import { getProvisionedTenant } from "../../utils/tenantProvision";
+import "./Login.css";
 
 const REMEMBER_LOGIN_KEY = "mahima_remember_login";
 const GOOGLE_SCRIPT_SRC = "https://accounts.google.com/gsi/client";
@@ -36,12 +39,18 @@ function tenantSlugFromCurrentUrl() {
     const hashQuery = hash.includes("?") ? hash.slice(hash.indexOf("?") + 1) : "";
     const hashParams = new URLSearchParams(hashQuery);
     const hashTenantMatch = hash.match(/^#\/t\/([^/?#]+)/i);
-    return (
+    const fromUrl = (
       params.get("tenantSlug") ||
       params.get("tenant") ||
       hashParams.get("tenantSlug") ||
       hashParams.get("tenant") ||
       (hashTenantMatch ? decodeURIComponent(hashTenantMatch[1]) : "") ||
+      ""
+    ).trim();
+    return fromUrl || (
+      localStorage.getItem("mahima_tenant_slug") ||
+      localStorage.getItem("tenantSlug") ||
+      localStorage.getItem("tenant_slug") ||
       ""
     ).trim();
   } catch {
@@ -128,7 +137,14 @@ function validateRegistrationForm({ username, displayName, phone, password }) {
 
 export default function Login() {
   const navigate = useNavigate();
-  const [loginTenantSlug] = useState(() => tenantSlugFromCurrentUrl());
+  const [loginTenantSlug, setLoginTenantSlug] = useState(() => tenantSlugFromCurrentUrl());
+  const [fullTenantOptions, setFullTenantOptions] = useState([]);
+  const [tenantDirectoryLoading, setTenantDirectoryLoading] = useState(false);
+  const [provisionedTenant, setProvisionedTenant] = useState(null);
+  const [tenantPickerUnlocked, setTenantPickerUnlocked] = useState(false);
+  const tenantOptions = provisionedTenant && !tenantPickerUnlocked
+    ? [{ name: provisionedTenant.name || humanizeSlug(provisionedTenant.slug), slug: provisionedTenant.slug }]
+    : fullTenantOptions;
   const autoLoginStarted = useRef(false);
   const googleButtonRef = useRef(null);
   const runtimeGoogleClientId = typeof window !== "undefined" ? (window.__GOOGLE_CLIENT_ID__ || window.__GOOGLE_WEB_CLIENT_ID__ || "") : "";
@@ -150,17 +166,75 @@ export default function Login() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [forgotSent, setForgotSent] = useState("");
+  const [mfaChallengeId, setMfaChallengeId] = useState(null);
+  const [mfaCode, setMfaCode] = useState("");
   const [googleReady, setGoogleReady] = useState(false);
   const [nativeGoogleReady, setNativeGoogleReady] = useState(false);
-<<<<<<< HEAD
-=======
   const [tenantBrand, setTenantBrand] = useState(null);
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
+
+  useEffect(() => {
+    let cancelled = false;
+    setTenantDirectoryLoading(true);
+    fetch(`${API_BASE}/public/tenants`, { headers: { Accept: "application/json" }, cache: "no-store" })
+      .then((res) => {
+        if (!res.ok) throw new Error(`Church directory could not be loaded (${res.status}).`);
+        return res.json();
+      })
+      .then((data) => {
+        if (!cancelled) setFullTenantOptions(Array.isArray(data?.tenants) ? data.tenants : []);
+      })
+      .catch((err) => {
+        console.warn("[login] Church directory failed", err);
+        if (!cancelled) setError("Could not load the church list. Check your internet connection and try again.");
+      })
+      .finally(() => { if (!cancelled) setTenantDirectoryLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getProvisionedTenant().then((tenant) => {
+      if (cancelled || !tenant?.slug) return;
+      setProvisionedTenant(tenant);
+      selectTenant(tenant.slug);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  function selectTenant(slug) {
+    const nextSlug = String(slug || "").trim();
+    setLoginTenantSlug(nextSlug);
+    setTenantBrand(null);
+    setError("");
+    setForgotSent("");
+    if (nextSlug) {
+      localStorage.setItem("mahima_tenant_slug", nextSlug);
+      localStorage.setItem("tenantSlug", nextSlug);
+    } else {
+      localStorage.removeItem("mahima_tenant_slug");
+      localStorage.removeItem("tenantSlug");
+      localStorage.removeItem("tenant_slug");
+    }
+    localStorage.removeItem("authToken");
+    localStorage.removeItem("mahima_token");
+    localStorage.removeItem("token");
+    localStorage.removeItem("mahima_user");
+    localStorage.removeItem("user");
+    localStorage.removeItem("me");
+    localStorage.removeItem("mahima_auth_tenant_slug");
+    clearSharedAuthToken();
+  }
 
   function persistAuthSession(token, user = null) {
     localStorage.setItem("authToken", token);
     localStorage.setItem("mahima_token", token);
     localStorage.setItem("token", token);
+    persistSharedAuthToken(token);
+    if (loginTenantSlug) {
+      localStorage.setItem("mahima_auth_tenant_slug", loginTenantSlug);
+      localStorage.setItem("mahima_tenant_slug", loginTenantSlug);
+      localStorage.setItem("tenantSlug", loginTenantSlug);
+    }
 
     if (user) {
       localStorage.setItem("mahima_user", JSON.stringify(user));
@@ -179,6 +253,7 @@ export default function Login() {
       localStorage.removeItem("mahima_user");
       localStorage.removeItem("user");
       localStorage.removeItem("me");
+      clearSharedAuthToken();
     }
 
     if (getStoredToken()) {
@@ -193,7 +268,7 @@ export default function Login() {
     setPassword(remembered.password);
     setRememberMe(true);
 
-    if (!isMobileAppMode() || autoLoginStarted.current) return;
+    if (!isMobileAppMode() || !tenantSlug || remembered.tenantSlug !== tenantSlug || autoLoginStarted.current) return;
     autoLoginStarted.current = true;
     performLogin(remembered.username, remembered.password, true);
   }, [loginTenantSlug]);
@@ -574,6 +649,7 @@ export default function Login() {
           JSON.stringify({
             username: cleanUsername,
             password: cleanPassword,
+            tenantSlug: loginTenantSlug,
             savedAt: new Date().toISOString(),
           })
         );
@@ -619,6 +695,11 @@ export default function Login() {
   async function performLogin(cleanUsername, cleanPassword, silent = false) {
     setError("");
 
+    if (!loginTenantSlug) {
+      setError("Select your church before signing in.");
+      return;
+    }
+
     if (!cleanUsername || !cleanPassword) {
       setError("Username and Password are required");
       return;
@@ -631,7 +712,15 @@ export default function Login() {
         usernameOrEmail: cleanUsername,
         username: cleanUsername,
         password: cleanPassword,
-      });
+      }, loginTenantSlug);
+
+      const mfaRequired = res?.mfaRequired || res?.data?.mfaRequired;
+      const challengeId = res?.challengeId || res?.data?.challengeId;
+      if (mfaRequired && challengeId) {
+        setMfaChallengeId(challengeId);
+        saveRememberedLogin(cleanUsername, cleanPassword);
+        return;
+      }
 
       const token = res?.token || res?.data?.token;
       const user = res?.user || res?.data?.user;
@@ -658,6 +747,30 @@ export default function Login() {
     }
   }
 
+  async function submitMfaCode(e) {
+    e.preventDefault();
+    if (!mfaCode.trim()) return;
+    setError("");
+    setLoading(true);
+    try {
+      const res = await mfaLoginVerify({ challengeId: mfaChallengeId, code: mfaCode.trim() }, loginTenantSlug);
+      const token = res?.token || res?.data?.token;
+      const user = res?.user || res?.data?.user;
+      if (!token) throw new Error("Invalid or expired code.");
+
+      persistAuthSession(token, user);
+      setMfaChallengeId(null);
+      setMfaCode("");
+
+      await syncNativePushAfterAuth(user);
+      navigate("/home", { replace: true });
+    } catch (err) {
+      setError(err.message || "Invalid or expired code.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleLogin(e) {
     e.preventDefault();
     await performLogin(username.trim(), password, false);
@@ -666,6 +779,11 @@ export default function Login() {
   async function handleRegister(e) {
     e.preventDefault();
     setError("");
+
+    if (!loginTenantSlug) {
+      setError("Select your church before creating an account.");
+      return;
+    }
 
     const cleanUsername = username.trim();
     const cleanDisplayName = displayName.trim();
@@ -692,7 +810,7 @@ export default function Login() {
         displayName: cleanDisplayName,
       };
 
-      const res = await register(payload);
+      const res = await register(payload, loginTenantSlug);
       if (!res?.ok) {
         throw new Error(res?.error || "Account creation failed");
       }
@@ -721,6 +839,11 @@ export default function Login() {
   async function handleGoogleCredential(response) {
     setError("");
 
+    if (!loginTenantSlug) {
+      setError("Select your church before signing in with Google.");
+      return;
+    }
+
     if (!response?.credential) {
       setError("Google sign-in did not return a login token.");
       return;
@@ -729,7 +852,7 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const res = await googleLogin({ idToken: response.credential });
+      const res = await googleLogin({ idToken: response.credential }, loginTenantSlug);
       if (!res?.ok) {
         throw new Error(res?.error || "Google login failed");
       }
@@ -758,27 +881,20 @@ export default function Login() {
     e.preventDefault();
     setError("");
 
+    if (!loginTenantSlug) {
+      setError("Select your church before resetting a password.");
+      return;
+    }
+
     if (!username.trim()) {
       setError("Username / Email is required");
-      return;
-    }
-    if (!phone.trim()) {
-      setError("Registered mobile number is required");
-      return;
-    }
-    if (!resetPassword || resetPassword.length < 6) {
-      setError("New password must be at least 6 characters");
-      return;
-    }
-    if (resetPassword !== resetConfirmPassword) {
-      setError("New password and confirmation do not match");
       return;
     }
 
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_BASE}/auth/reset-password-direct`, {
+      const res = await fetch(`${API_BASE}/auth/forgot-password`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -786,15 +902,11 @@ export default function Login() {
         },
         body: JSON.stringify({
           usernameOrEmail: username.trim(),
-          phone: phone.trim(),
-          newPassword: resetPassword,
         }),
       });
-      // The endpoint deliberately returns 200 + a generic message regardless
-      // of whether the account exists, so we don't leak account enumeration.
       let msg = res.ok
-        ? "Your password has been reset. Please sign in with the new password."
-        : "Password reset failed. Please check the username/email and registered mobile number.";
+        ? "If this account has an email address, a password reset link has been sent."
+        : "Password reset request failed. Please try again.";
       try {
         const json = await res.json();
         if (json?.message) msg = json.message;
@@ -805,9 +917,6 @@ export default function Login() {
         return;
       }
 
-      setPassword("");
-      setResetPassword("");
-      setResetConfirmPassword("");
       setForgotSent(msg);
       setMode("login");
     } catch (err) {
@@ -834,13 +943,64 @@ export default function Login() {
   };
 
   return (
-    <div style={page}>
-      <div style={card}>
+    <div className="login-experience" style={page}>
+      <div className="login-stars" aria-hidden="true">
+        {Array.from({ length: 28 }, (_, index) => (
+          <span key={index} style={{
+            "--star-size": `${2 + (index % 4)}px`,
+            "--star-opacity": 0.25 + (index % 5) * 0.1,
+            "--star-duration": `${8 + (index % 7) * 1.2}s`,
+            "--star-delay": `${index * -0.73}s`,
+            left: `${(index * 37) % 100}%`,
+          }} />
+        ))}
+      </div>
+      <div className="login-shell">
+        <aside className="login-welcome">
+          <span className="login-kicker">One church. One connected ministry.</span>
+          <h1>Welcome back to your <span>digital church home.</span></h1>
+          <p>Serve your people, coordinate your teams and keep every ministry moving together from one secure place.</p>
+          <div className="login-trust-row">
+            <span>Secure tenant access</span><span>Ministry tools in one place</span><span>Available anywhere</span>
+          </div>
+        </aside>
+        <div className="login-glass-card" style={card}>
         <div style={logoSection}>
           <img src={tenantLogo} alt={tenantName} style={logo} />
           <h2 style={title}>{tenantName}</h2>
         </div>
 
+        {mfaChallengeId ? (
+          <form onSubmit={submitMfaCode} style={{ width: "100%" }}>
+            <p style={subtitle}>Enter verification code</p>
+            <p style={{ color: "#d1fae5", fontSize: 13, marginBottom: 16, textAlign: "left" }}>
+              Enter the 6-digit code from your authenticator app to finish signing in.
+            </p>
+            <input
+              autoFocus
+              style={{ ...input, textAlign: "center", letterSpacing: 4, fontSize: 20 }}
+              placeholder="000000"
+              maxLength={6}
+              value={mfaCode}
+              onChange={(e) => setMfaCode(e.target.value)}
+              required
+            />
+            {error && <div style={errorBox}>{error}</div>}
+            <button type="submit" style={brandedButton} disabled={loading}>
+              {loading ? "Verifying..." : "Verify & Sign In"}
+            </button>
+            <div style={row}>
+              <button
+                type="button"
+                style={linkButton}
+                onClick={() => { setMfaChallengeId(null); setMfaCode(""); setError(""); }}
+              >
+                Back to login
+              </button>
+            </div>
+          </form>
+        ) : (
+          <>
         <p style={subtitle}>
           {mode === "login"
             ? "Welcome back"
@@ -848,6 +1008,39 @@ export default function Login() {
             ? "Create your account"
             : "Reset your password"}
         </p>
+
+        {(
+          <label style={{ display: "grid", gap: 6, marginBottom: 14, color: "#d1fae5", fontSize: 13, fontWeight: 800 }}>
+            Select your church
+            <select
+              value={loginTenantSlug}
+              onChange={(event) => selectTenant(event.target.value)}
+              disabled={tenantDirectoryLoading || Boolean(provisionedTenant && !tenantPickerUnlocked)}
+              required
+              style={{ ...input, marginBottom: 0, cursor: "pointer" }}
+            >
+              <option value="">{tenantDirectoryLoading ? "Loading churches..." : "Choose church / tenant"}</option>
+              {tenantOptions.map((tenant) => (
+                <option key={tenant.slug} value={tenant.slug}>
+                  {tenant.name} ({tenant.slug})
+                </option>
+              ))}
+            </select>
+            {provisionedTenant && !tenantPickerUnlocked ? (
+              <button
+                type="button"
+                onClick={() => setTenantPickerUnlocked(true)}
+                style={{ justifySelf: "start", background: "none", border: "none", padding: 0, color: "#a7f3d0", fontSize: 11, fontWeight: 700, textDecoration: "underline", cursor: "pointer" }}
+              >
+                Not your church? Tap to change
+              </button>
+            ) : (
+              <span style={{ color: "#94a3b8", fontSize: 11, fontWeight: 600 }}>
+                Your selection controls church branding, landing page and user authentication.
+              </span>
+            )}
+          </label>
+        )}
 
         {mode !== "forgot" && (
           <div style={tabRow}>
@@ -951,46 +1144,9 @@ export default function Login() {
           )}
 
           {mode === "forgot" && (
-            <>
-              <input
-                style={input}
-                type="tel"
-                inputMode="numeric"
-                maxLength={14}
-                placeholder="Registered Mobile Number"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                required
-              />
-
-              <div style={passwordWrap}>
-                <input
-                  style={{ ...input, paddingRight: 56 }}
-                  type={showPwd ? "text" : "password"}
-                  placeholder="New Password"
-                  value={resetPassword}
-                  onChange={(e) => setResetPassword(e.target.value)}
-                  required
-                />
-
-                <button
-                  type="button"
-                  onClick={() => setShowPwd(!showPwd)}
-                  style={eyeButton}
-                >
-                  {showPwd ? "Hide" : "Show"}
-                </button>
-              </div>
-
-              <input
-                style={input}
-                type={showPwd ? "text" : "password"}
-                placeholder="Confirm New Password"
-                value={resetConfirmPassword}
-                onChange={(e) => setResetConfirmPassword(e.target.value)}
-                required
-              />
-            </>
+            <div style={{ color: "#cbd5e1", fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
+              Enter your root ID or email. We will send a secure, single-use reset link to the email registered on the account.
+            </div>
           )}
 
           {mode !== "forgot" && (
@@ -1068,29 +1224,31 @@ export default function Login() {
               : "Reset Password"}
           </button>
         </form>
+          </>
+        )}
+        </div>
       </div>
     </div>
   );
 }
 
 const page = {
+  height: "100dvh",
   minHeight: "100vh",
-  display: "flex",
-  justifyContent: "center",
-  alignItems: "center",
-  background: "linear-gradient(180deg, #f8fafc 0%, #f6f8fb 52%, #eef4f1 100%)",
-  padding: 16,
+  overflowY: "auto",
+  background: "#06131b",
+  padding: 24,
   boxSizing: "border-box",
 };
 
 const card = {
   width: "100%",
-  maxWidth: 380,
+  maxWidth: 420,
   padding: 30,
-  borderRadius: 12,
-  background: "#fff",
-  border: "1px solid #dfe7ef",
-  boxShadow: "0 24px 54px rgba(15,23,42,0.12)",
+  borderRadius: 24,
+  background: "linear-gradient(145deg, rgba(12,27,35,.9), rgba(7,19,27,.82))",
+  border: "1px solid rgba(255,255,255,.16)",
+  boxShadow: "0 30px 80px rgba(0,0,0,.42)",
   textAlign: "center",
   boxSizing: "border-box",
 };
@@ -1108,10 +1266,11 @@ const title = {
   margin: 0,
   fontSize: 26,
   fontWeight: 600,
+  color: "#ffffff",
 };
 
 const subtitle = {
-  color: "#617086",
+  color: "#d1fae5",
   marginBottom: 20,
   fontSize: 18,
 };
@@ -1137,9 +1296,9 @@ const activeTab = {
 const tab = {
   flex: 1,
   padding: 10,
-  background: "#fff",
-  color: "#102033",
-  border: "1px solid #dfe7ef",
+  background: "rgba(255,255,255,.08)",
+  color: "#ffffff",
+  border: "1px solid rgba(255,255,255,.16)",
   borderRadius: 8,
   cursor: "pointer",
   fontWeight: "bold",
@@ -1159,7 +1318,7 @@ const googleFallbackButton = {
   marginBottom: 14,
   border: "1px solid #dfe7ef",
   borderRadius: 8,
-  background: "#fff",
+  background: "rgba(255,255,255,.92)",
   color: "#102033",
   cursor: "pointer",
   fontWeight: 700,
@@ -1176,11 +1335,11 @@ const dividerRow = {
 const dividerLine = {
   flex: 1,
   height: 1,
-  background: "#dfe7ef",
+  background: "rgba(255,255,255,.2)",
 };
 
 const dividerText = {
-  color: "#617086",
+  color: "#d1fae5",
   fontSize: 13,
   fontWeight: 700,
   textTransform: "uppercase",
@@ -1192,6 +1351,7 @@ const input = {
   marginBottom: 12,
   borderRadius: 8,
   border: "1px solid #dfe7ef",
+  background: "rgba(255,255,255,.94)",
   fontSize: 16,
   outline: "none",
   boxSizing: "border-box",

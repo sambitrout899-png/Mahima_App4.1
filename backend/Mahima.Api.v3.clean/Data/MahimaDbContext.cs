@@ -51,14 +51,32 @@ namespace Mahima.Api.v3.clean.Data
         public DbSet<ModuleCatalogItem> ModuleCatalog => Set<ModuleCatalogItem>();
         public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
         public DbSet<SubscriptionPlanModule> SubscriptionPlanModules => Set<SubscriptionPlanModule>();
+        public DbSet<SubscriptionPlanPublication> SubscriptionPlanPublications => Set<SubscriptionPlanPublication>();
         public DbSet<TenantSubscription> TenantSubscriptions => Set<TenantSubscription>();
         public DbSet<TenantModuleLicense> TenantModuleLicenses => Set<TenantModuleLicense>();
         public DbSet<TenantModuleRequest> TenantModuleRequests => Set<TenantModuleRequest>();
+        public DbSet<QaTestRun> QaTestRuns => Set<QaTestRun>();
+        public DbSet<QaTestFinding> QaTestFindings => Set<QaTestFinding>();
+        public DbSet<QaTestPlan> QaTestPlans => Set<QaTestPlan>();
+        public DbSet<QaTestCase> QaTestCases => Set<QaTestCase>();
         public DbSet<PaymentIntent> PaymentIntents => Set<PaymentIntent>();
         public DbSet<PaymentEvent> PaymentEvents => Set<PaymentEvent>();
         public DbSet<BillingInvoice> BillingInvoices => Set<BillingInvoice>();
         public DbSet<BillingInvoiceLine> BillingInvoiceLines => Set<BillingInvoiceLine>();
         public DbSet<TenantLandingConfig> TenantLandingConfigs => Set<TenantLandingConfig>();
+        public DbSet<TenantBranding> TenantBrandings => Set<TenantBranding>();
+        public DbSet<TenantLandingDraft> TenantLandingDrafts => Set<TenantLandingDraft>();
+        public DbSet<TenantLandingVersion> TenantLandingVersions => Set<TenantLandingVersion>();
+        public DbSet<MarketingProspect> MarketingProspects => Set<MarketingProspect>();
+        public DbSet<MarketingCampaign> MarketingCampaigns => Set<MarketingCampaign>();
+        public DbSet<MarketingOutreach> MarketingOutreach => Set<MarketingOutreach>();
+        public DbSet<MarketingCommunicationEvent> MarketingCommunicationEvents => Set<MarketingCommunicationEvent>();
+        public DbSet<WhatsAppContactState> WhatsAppContactStates => Set<WhatsAppContactState>();
+        public DbSet<MarketingLead> MarketingLeads => Set<MarketingLead>();
+        public DbSet<MarketingQuote> MarketingQuotes => Set<MarketingQuote>();
+        public DbSet<MarketingOrder> MarketingOrders => Set<MarketingOrder>();
+        public DbSet<MarketingDiscoverySchedule> MarketingDiscoverySchedules => Set<MarketingDiscoverySchedule>();
+        public DbSet<MarketingDiscoveryRun> MarketingDiscoveryRuns => Set<MarketingDiscoveryRun>();
 
         public DbSet<PrayerResponse> PrayerResponses => Set<PrayerResponse>();
 
@@ -74,6 +92,14 @@ namespace Mahima.Api.v3.clean.Data
 		public DbSet<Account> Accounts { get; set; } = null!;
         public DbSet<JournalEntry> JournalEntries { get; set; } = null!;
 		public DbSet<JournalLine> JournalLines { get; set; } = null!;
+
+        public DbSet<EventItem> Events => Set<EventItem>();
+        public DbSet<EventRsvp> EventRsvps => Set<EventRsvp>();
+        public DbSet<ChildCheckIn> ChildCheckIns => Set<ChildCheckIn>();
+        public DbSet<VolunteerShift> VolunteerShifts => Set<VolunteerShift>();
+        public DbSet<VolunteerSignup> VolunteerSignups => Set<VolunteerSignup>();
+        public DbSet<ServicePlan> ServicePlans => Set<ServicePlan>();
+        public DbSet<ServicePlanItem> ServicePlanItems => Set<ServicePlanItem>();
 
         private static void ConfigureMultiTenancy(ModelBuilder modelBuilder)
         {
@@ -92,9 +118,12 @@ namespace Mahima.Api.v3.clean.Data
                 eb.Property(t => t.ContactName).HasColumnName("contact_name").HasMaxLength(160);
                 eb.Property(t => t.ContactEmail).HasColumnName("contact_email").HasMaxLength(256);
                 eb.Property(t => t.ContactPhone).HasColumnName("contact_phone").HasMaxLength(32);
+                eb.Property(t => t.CountryCode).HasColumnName("country_code").HasMaxLength(2).HasDefaultValue("IN");
                 eb.Property(t => t.UserCodePrefix).HasColumnName("user_code_prefix").HasMaxLength(12).HasDefaultValue("MHN");
                 eb.Property(t => t.Status).HasColumnName("status").HasMaxLength(32).HasDefaultValue("active");
                 eb.Property(t => t.IsRootTenant).HasColumnName("is_root_tenant").HasDefaultValue(false);
+                eb.Property(t => t.WhatsAppUserNotificationTemplateSid).HasColumnName("whatsapp_user_notification_template_sid").HasMaxLength(64);
+                eb.Property(t => t.WhatsAppMarketingTemplateSid).HasColumnName("whatsapp_marketing_template_sid").HasMaxLength(64);
                 eb.Property(t => t.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
                 eb.Property(t => t.UpdatedAtUtc).HasColumnName("updated_at_utc").HasDefaultValueSql("now()");
                 eb.HasIndex(t => t.Slug).IsUnique();
@@ -128,9 +157,36 @@ namespace Mahima.Api.v3.clean.Data
                 eb.Property(p => p.IsBaseFreePlan).HasColumnName("is_base_free_plan").HasDefaultValue(false);
                 eb.Property(p => p.Enabled).HasColumnName("enabled").HasDefaultValue(true);
                 eb.Property(p => p.DisplayOrder).HasColumnName("display_order").HasDefaultValue(0);
+                eb.Property(p => p.LifecycleStatus).HasColumnName("lifecycle_status").HasMaxLength(32).HasDefaultValue("draft");
+                eb.Property(p => p.ContractMonths).HasColumnName("contract_months").HasDefaultValue(12);
+                eb.Property(p => p.EarlyExitPenaltyPercent).HasColumnName("early_exit_penalty_percent").HasColumnType("numeric(5,2)").HasDefaultValue(10);
+                eb.Property(p => p.StorageLimitGb).HasColumnName("storage_limit_gb").HasColumnType("numeric(12,2)").HasDefaultValue(10);
+                eb.Property(p => p.AiTokensIncludedMonthly).HasColumnName("ai_tokens_included_monthly").HasDefaultValue(0L);
+                eb.Property(p => p.StorageOveragePricePerGbInr).HasColumnName("storage_overage_price_per_gb_inr").HasColumnType("numeric(12,2)").HasDefaultValue(0);
+                eb.Property(p => p.AiOveragePricePerMillionTokensInr).HasColumnName("ai_overage_price_per_million_tokens_inr").HasColumnType("numeric(12,2)").HasDefaultValue(0);
+                eb.Property(p => p.AiCreditsIncludedInr).HasColumnName("ai_credits_included_inr").HasColumnType("numeric(12,2)").HasDefaultValue(0);
+                eb.Property(p => p.AiOverageMarkupMultiplier).HasColumnName("ai_overage_markup_multiplier").HasColumnType("numeric(6,2)").HasDefaultValue(2.5m);
+                eb.Property(p => p.PublishedVersion).HasColumnName("published_version").HasDefaultValue(0);
+                eb.Property(p => p.PublishedAtUtc).HasColumnName("published_at_utc");
                 eb.Property(p => p.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
                 eb.Property(p => p.UpdatedAtUtc).HasColumnName("updated_at_utc").HasDefaultValueSql("now()");
                 eb.HasIndex(p => p.Code).IsUnique();
+            });
+
+            modelBuilder.Entity<SubscriptionPlanPublication>(eb =>
+            {
+                eb.ToTable("subscription_plan_publications", "public");
+                eb.HasKey(p => p.Id);
+                eb.Property(p => p.Id).HasColumnName("id");
+                eb.Property(p => p.PlanId).HasColumnName("plan_id");
+                eb.Property(p => p.Version).HasColumnName("version");
+                eb.Property(p => p.DefinitionJson).HasColumnName("definition_json").HasColumnType("jsonb");
+                eb.Property(p => p.EffectiveAtUtc).HasColumnName("effective_at_utc");
+                eb.Property(p => p.PublishedAtUtc).HasColumnName("published_at_utc").HasDefaultValueSql("now()");
+                eb.Property(p => p.ExpiredAtUtc).HasColumnName("expired_at_utc");
+                eb.Property(p => p.PublishedByUserId).HasColumnName("published_by_user_id");
+                eb.HasOne(p => p.Plan).WithMany(p => p.Publications).HasForeignKey(p => p.PlanId).OnDelete(DeleteBehavior.Cascade);
+                eb.HasIndex(p => new { p.PlanId, p.Version }).IsUnique();
             });
 
             modelBuilder.Entity<SubscriptionPlanModule>(eb =>
@@ -151,10 +207,12 @@ namespace Mahima.Api.v3.clean.Data
                 eb.Property(s => s.Id).HasColumnName("id");
                 eb.Property(s => s.TenantId).HasColumnName("tenant_id");
                 eb.Property(s => s.PlanId).HasColumnName("plan_id");
+                eb.Property(s => s.AppliedPlanVersion).HasColumnName("applied_plan_version").HasDefaultValue(0);
                 eb.Property(s => s.Status).HasColumnName("status").HasMaxLength(32).HasDefaultValue("active");
                 eb.Property(s => s.StartsAtUtc).HasColumnName("starts_at_utc").HasDefaultValueSql("now()");
                 eb.Property(s => s.EndsAtUtc).HasColumnName("ends_at_utc");
                 eb.Property(s => s.TrialEndsAtUtc).HasColumnName("trial_ends_at_utc");
+                eb.Property(s => s.ContractEndsAtUtc).HasColumnName("contract_ends_at_utc");
                 eb.Property(s => s.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
                 eb.Property(s => s.UpdatedAtUtc).HasColumnName("updated_at_utc").HasDefaultValueSql("now()");
                 eb.HasOne(s => s.Tenant).WithMany(t => t.Subscriptions).HasForeignKey(s => s.TenantId).OnDelete(DeleteBehavior.Cascade);
@@ -296,28 +354,210 @@ namespace Mahima.Api.v3.clean.Data
                 eb.ToTable("tenant_landing_configs", "public");
                 eb.HasKey(c => c.TenantId);
                 eb.Property(c => c.TenantId).HasColumnName("tenant_id");
-                eb.Property(c => c.LogoUrl).HasColumnName("logo_url");
                 eb.Property(c => c.HeroImageUrl).HasColumnName("hero_image_url");
                 eb.Property(c => c.HeroTitle).HasColumnName("hero_title").HasMaxLength(220).IsRequired();
                 eb.Property(c => c.HeroSubtitle).HasColumnName("hero_subtitle");
-                eb.Property(c => c.PrimaryColor).HasColumnName("primary_color").HasMaxLength(32);
-                eb.Property(c => c.AccentColor).HasColumnName("accent_color").HasMaxLength(32);
-                eb.Property(c => c.ContactEmail).HasColumnName("contact_email").HasMaxLength(256);
-                eb.Property(c => c.ContactPhone).HasColumnName("contact_phone").HasMaxLength(32);
-                eb.Property(c => c.Address).HasColumnName("address");
+                eb.Property(c => c.HeroLayout).HasColumnName("hero_layout").HasMaxLength(32).HasDefaultValue("split-card");
                 eb.Property(c => c.ServiceTimesJson).HasColumnName("service_times_json").HasColumnType("jsonb");
-                eb.Property(c => c.SocialLinksJson).HasColumnName("social_links_json").HasColumnType("jsonb");
                 eb.Property(c => c.SectionsJson).HasColumnName("sections_json").HasColumnType("jsonb");
+                eb.Property(c => c.SeoTitle).HasColumnName("seo_title").HasMaxLength(220);
+                eb.Property(c => c.SeoDescription).HasColumnName("seo_description").HasMaxLength(400);
+                eb.Property(c => c.OgImageUrl).HasColumnName("og_image_url");
                 eb.Property(c => c.Published).HasColumnName("published").HasDefaultValue(true);
                 eb.Property(c => c.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
                 eb.Property(c => c.UpdatedAtUtc).HasColumnName("updated_at_utc").HasDefaultValueSql("now()");
                 eb.HasOne(c => c.Tenant).WithOne(t => t.LandingConfig).HasForeignKey<TenantLandingConfig>(c => c.TenantId).OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<TenantBranding>(eb =>
+            {
+                eb.ToTable("tenant_branding", "public");
+                eb.HasKey(c => c.TenantId);
+                eb.Property(c => c.TenantId).HasColumnName("tenant_id");
+                eb.Property(c => c.LogoUrl).HasColumnName("logo_url");
+                eb.Property(c => c.PrimaryColor).HasColumnName("primary_color").HasMaxLength(32).HasDefaultValue("#0f766e");
+                eb.Property(c => c.AccentColor).HasColumnName("accent_color").HasMaxLength(32).HasDefaultValue("#f59e0b");
+                eb.Property(c => c.NeutralColor).HasColumnName("neutral_color").HasMaxLength(32).HasDefaultValue("#f8fafc");
+                eb.Property(c => c.DarkColor).HasColumnName("dark_color").HasMaxLength(32).HasDefaultValue("#0f172a");
+                eb.Property(c => c.HeadingFont).HasColumnName("heading_font").HasMaxLength(80).HasDefaultValue("Inter");
+                eb.Property(c => c.BodyFont).HasColumnName("body_font").HasMaxLength(80).HasDefaultValue("Inter");
+                eb.Property(c => c.ContactEmail).HasColumnName("contact_email").HasMaxLength(256);
+                eb.Property(c => c.ContactPhone).HasColumnName("contact_phone").HasMaxLength(32);
+                eb.Property(c => c.Address).HasColumnName("address");
+                eb.Property(c => c.SocialLinksJson).HasColumnName("social_links_json").HasColumnType("jsonb");
+                eb.Property(c => c.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
+                eb.Property(c => c.UpdatedAtUtc).HasColumnName("updated_at_utc").HasDefaultValueSql("now()");
+                eb.HasOne(c => c.Tenant).WithOne(t => t.Branding).HasForeignKey<TenantBranding>(c => c.TenantId).OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<TenantLandingDraft>(eb =>
+            {
+                eb.ToTable("tenant_landing_drafts", "public");
+                eb.HasKey(c => c.TenantId);
+                eb.Property(c => c.TenantId).HasColumnName("tenant_id");
+                eb.Property(c => c.HeroTitle).HasColumnName("hero_title").HasMaxLength(220).IsRequired();
+                eb.Property(c => c.HeroSubtitle).HasColumnName("hero_subtitle");
+                eb.Property(c => c.HeroImageUrl).HasColumnName("hero_image_url");
+                eb.Property(c => c.HeroLayout).HasColumnName("hero_layout").HasMaxLength(32).HasDefaultValue("split-card");
+                eb.Property(c => c.ServiceTimesJson).HasColumnName("service_times_json").HasColumnType("jsonb").HasDefaultValue("[]");
+                eb.Property(c => c.SectionsJson).HasColumnName("sections_json").HasColumnType("jsonb").HasDefaultValue("[]");
+                eb.Property(c => c.SeoTitle).HasColumnName("seo_title").HasMaxLength(220);
+                eb.Property(c => c.SeoDescription).HasColumnName("seo_description").HasMaxLength(400);
+                eb.Property(c => c.OgImageUrl).HasColumnName("og_image_url");
+                eb.Property(c => c.UpdatedAtUtc).HasColumnName("updated_at_utc").HasDefaultValueSql("now()");
+                eb.Property(c => c.UpdatedByUserId).HasColumnName("updated_by_user_id");
+                eb.HasOne(c => c.Tenant).WithOne(t => t.LandingDraft).HasForeignKey<TenantLandingDraft>(c => c.TenantId).OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<TenantLandingVersion>(eb =>
+            {
+                eb.ToTable("tenant_landing_versions", "public");
+                eb.HasKey(c => c.Id);
+                eb.Property(c => c.Id).HasColumnName("id");
+                eb.Property(c => c.TenantId).HasColumnName("tenant_id");
+                eb.Property(c => c.SnapshotJson).HasColumnName("snapshot_json").HasColumnType("jsonb");
+                eb.Property(c => c.PublishedAtUtc).HasColumnName("published_at_utc").HasDefaultValueSql("now()");
+                eb.Property(c => c.PublishedByUserId).HasColumnName("published_by_user_id");
+                eb.HasOne(c => c.Tenant).WithMany().HasForeignKey(c => c.TenantId).OnDelete(DeleteBehavior.Cascade);
+                eb.HasIndex(c => new { c.TenantId, c.PublishedAtUtc });
+            });
+        }
+
+        private static void ConfigureCommunityModules(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<EventItem>(eb =>
+            {
+                eb.ToTable("events", "public");
+                eb.HasKey(e => e.Id);
+                eb.Property(e => e.Id).HasColumnName("id");
+                eb.Property(e => e.TenantId).HasColumnName("tenant_id");
+                eb.Property(e => e.Title).HasColumnName("title").HasMaxLength(200).IsRequired();
+                eb.Property(e => e.Description).HasColumnName("description");
+                eb.Property(e => e.Category).HasColumnName("category").HasMaxLength(60);
+                eb.Property(e => e.Location).HasColumnName("location");
+                eb.Property(e => e.CoverImageUrl).HasColumnName("cover_image_url");
+                eb.Property(e => e.StartAtUtc).HasColumnName("start_at_utc");
+                eb.Property(e => e.EndAtUtc).HasColumnName("end_at_utc");
+                eb.Property(e => e.IsPublic).HasColumnName("is_public").HasDefaultValue(true);
+                eb.Property(e => e.RequiresRsvp).HasColumnName("requires_rsvp").HasDefaultValue(false);
+                eb.Property(e => e.Capacity).HasColumnName("capacity");
+                eb.Property(e => e.Status).HasColumnName("status").HasMaxLength(20).HasDefaultValue("scheduled");
+                eb.Property(e => e.CreatedByUserId).HasColumnName("created_by_user_id");
+                eb.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
+                eb.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc").HasDefaultValueSql("now()");
+                eb.HasIndex(e => new { e.TenantId, e.StartAtUtc });
+            });
+
+            modelBuilder.Entity<EventRsvp>(eb =>
+            {
+                eb.ToTable("event_rsvps", "public");
+                eb.HasKey(r => r.Id);
+                eb.Property(r => r.Id).HasColumnName("id");
+                eb.Property(r => r.TenantId).HasColumnName("tenant_id");
+                eb.Property(r => r.EventId).HasColumnName("event_id");
+                eb.Property(r => r.UserId).HasColumnName("user_id");
+                eb.Property(r => r.GuestName).HasColumnName("guest_name").HasMaxLength(160);
+                eb.Property(r => r.GuestContact).HasColumnName("guest_contact").HasMaxLength(160);
+                eb.Property(r => r.PartySize).HasColumnName("party_size").HasDefaultValue(1);
+                eb.Property(r => r.Status).HasColumnName("status").HasMaxLength(20).HasDefaultValue("confirmed");
+                eb.Property(r => r.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
+                eb.HasIndex(r => new { r.EventId, r.Status });
+            });
+
+            modelBuilder.Entity<ChildCheckIn>(eb =>
+            {
+                eb.ToTable("child_checkins", "public");
+                eb.HasKey(c => c.Id);
+                eb.Property(c => c.Id).HasColumnName("id");
+                eb.Property(c => c.TenantId).HasColumnName("tenant_id");
+                eb.Property(c => c.EventId).HasColumnName("event_id");
+                eb.Property(c => c.ChildName).HasColumnName("child_name").HasMaxLength(160).IsRequired();
+                eb.Property(c => c.ChildDob).HasColumnName("child_dob").HasColumnType("date");
+                eb.Property(c => c.GuardianName).HasColumnName("guardian_name").HasMaxLength(160).IsRequired();
+                eb.Property(c => c.GuardianPhone).HasColumnName("guardian_phone").HasMaxLength(32);
+                eb.Property(c => c.GuardianUserId).HasColumnName("guardian_user_id");
+                eb.Property(c => c.SecurityCode).HasColumnName("security_code").HasMaxLength(12).IsRequired();
+                eb.Property(c => c.AllergyNotes).HasColumnName("allergy_notes");
+                eb.Property(c => c.GeneralNotes).HasColumnName("general_notes");
+                eb.Property(c => c.CheckedInAtUtc).HasColumnName("checked_in_at_utc").HasDefaultValueSql("now()");
+                eb.Property(c => c.CheckedInByUserId).HasColumnName("checked_in_by_user_id");
+                eb.Property(c => c.CheckedOutAtUtc).HasColumnName("checked_out_at_utc");
+                eb.Property(c => c.CheckedOutByUserId).HasColumnName("checked_out_by_user_id");
+                eb.HasIndex(c => new { c.TenantId, c.CheckedOutAtUtc });
+            });
+
+            modelBuilder.Entity<VolunteerShift>(eb =>
+            {
+                eb.ToTable("volunteer_shifts", "public");
+                eb.HasKey(s => s.Id);
+                eb.Property(s => s.Id).HasColumnName("id");
+                eb.Property(s => s.TenantId).HasColumnName("tenant_id");
+                eb.Property(s => s.Title).HasColumnName("title").HasMaxLength(200).IsRequired();
+                eb.Property(s => s.Notes).HasColumnName("notes");
+                eb.Property(s => s.TeamId).HasColumnName("team_id");
+                eb.Property(s => s.EventId).HasColumnName("event_id");
+                eb.Property(s => s.ShiftDate).HasColumnName("shift_date").HasColumnType("date");
+                eb.Property(s => s.StartTime).HasColumnName("start_time").HasColumnType("time without time zone");
+                eb.Property(s => s.EndTime).HasColumnName("end_time").HasColumnType("time without time zone");
+                eb.Property(s => s.SlotsNeeded).HasColumnName("slots_needed").HasDefaultValue(1);
+                eb.Property(s => s.CreatedByUserId).HasColumnName("created_by_user_id");
+                eb.Property(s => s.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
+                eb.Property(s => s.UpdatedAtUtc).HasColumnName("updated_at_utc").HasDefaultValueSql("now()");
+                eb.HasIndex(s => new { s.TenantId, s.ShiftDate });
+            });
+
+            modelBuilder.Entity<VolunteerSignup>(eb =>
+            {
+                eb.ToTable("volunteer_signups", "public");
+                eb.HasKey(s => s.Id);
+                eb.Property(s => s.Id).HasColumnName("id");
+                eb.Property(s => s.TenantId).HasColumnName("tenant_id");
+                eb.Property(s => s.ShiftId).HasColumnName("shift_id");
+                eb.Property(s => s.UserId).HasColumnName("user_id");
+                eb.Property(s => s.Status).HasColumnName("status").HasMaxLength(20).HasDefaultValue("signed_up");
+                eb.Property(s => s.SignedUpAtUtc).HasColumnName("signed_up_at_utc").HasDefaultValueSql("now()");
+                eb.Property(s => s.ReminderSentAtUtc).HasColumnName("reminder_sent_at_utc");
+                eb.HasIndex(s => new { s.ShiftId, s.Status });
+            });
+
+            modelBuilder.Entity<ServicePlan>(eb =>
+            {
+                eb.ToTable("service_plans", "public");
+                eb.HasKey(p => p.Id);
+                eb.Property(p => p.Id).HasColumnName("id");
+                eb.Property(p => p.TenantId).HasColumnName("tenant_id");
+                eb.Property(p => p.Title).HasColumnName("title").HasMaxLength(200).IsRequired();
+                eb.Property(p => p.ServiceDate).HasColumnName("service_date").HasColumnType("date");
+                eb.Property(p => p.SermonId).HasColumnName("sermon_id");
+                eb.Property(p => p.Notes).HasColumnName("notes");
+                eb.Property(p => p.CreatedByUserId).HasColumnName("created_by_user_id");
+                eb.Property(p => p.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
+                eb.Property(p => p.UpdatedAtUtc).HasColumnName("updated_at_utc").HasDefaultValueSql("now()");
+                eb.HasIndex(p => new { p.TenantId, p.ServiceDate });
+            });
+
+            modelBuilder.Entity<ServicePlanItem>(eb =>
+            {
+                eb.ToTable("service_plan_items", "public");
+                eb.HasKey(i => i.Id);
+                eb.Property(i => i.Id).HasColumnName("id");
+                eb.Property(i => i.TenantId).HasColumnName("tenant_id");
+                eb.Property(i => i.ServicePlanId).HasColumnName("service_plan_id");
+                eb.Property(i => i.OrderIndex).HasColumnName("order_index").HasDefaultValue(0);
+                eb.Property(i => i.ItemType).HasColumnName("item_type").HasMaxLength(30).HasDefaultValue("song");
+                eb.Property(i => i.Title).HasColumnName("title").HasMaxLength(200).IsRequired();
+                eb.Property(i => i.Details).HasColumnName("details");
+                eb.Property(i => i.AssignedUserId).HasColumnName("assigned_user_id");
+                eb.Property(i => i.DurationMinutes).HasColumnName("duration_minutes");
+                eb.HasIndex(i => new { i.ServicePlanId, i.OrderIndex });
             });
         }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             ConfigureMultiTenancy(modelBuilder);
+            ConfigureMarketing(modelBuilder);
+            ConfigureCommunityModules(modelBuilder);
 
             modelBuilder.Entity<Attachment>(eb =>
             {
@@ -480,6 +720,79 @@ namespace Mahima.Api.v3.clean.Data
                 eb.Property(l => l.Rtl).HasColumnName("rtl").HasDefaultValue(false);
                 eb.Property(l => l.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()");
                 eb.Property(l => l.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("now()");
+            });
+            modelBuilder.Entity<QaTestRun>(eb =>
+            {
+                eb.ToTable("qa_test_runs", "public");
+                eb.HasKey(x => x.Id);
+                eb.Property(x => x.Id).HasColumnName("id");
+                eb.Property(x => x.StartedByUserId).HasColumnName("started_by_user_id");
+                eb.Property(x => x.PlanId).HasColumnName("plan_id");
+                eb.Property(x => x.RequestedModulesJson).HasColumnName("requested_modules_json").HasColumnType("jsonb");
+                eb.Property(x => x.Status).HasColumnName("status").HasMaxLength(24);
+                eb.Property(x => x.PassedCount).HasColumnName("passed_count");
+                eb.Property(x => x.WarningCount).HasColumnName("warning_count");
+                eb.Property(x => x.FailedCount).HasColumnName("failed_count");
+                eb.Property(x => x.StartedAtUtc).HasColumnName("started_at_utc");
+                eb.Property(x => x.CompletedAtUtc).HasColumnName("completed_at_utc");
+                eb.Property(x => x.Error).HasColumnName("error");
+                eb.Property(x => x.LoadTestMetricsJson).HasColumnName("load_test_metrics_json").HasColumnType("jsonb");
+                eb.HasIndex(x => x.StartedAtUtc);
+            });
+            modelBuilder.Entity<QaTestPlan>(eb =>
+            {
+                eb.ToTable("qa_test_plans", "public"); eb.HasKey(x => x.Id);
+                eb.Property(x => x.Id).HasColumnName("id"); eb.Property(x => x.Name).HasColumnName("name").HasMaxLength(240);
+                eb.Property(x => x.ModulesJson).HasColumnName("modules_json").HasColumnType("jsonb");
+                eb.Property(x => x.Status).HasColumnName("status").HasMaxLength(24);
+                eb.Property(x => x.GeneratedByUserId).HasColumnName("generated_by_user_id");
+                eb.Property(x => x.ReviewedByUserId).HasColumnName("reviewed_by_user_id");
+                eb.Property(x => x.GeneratedAtUtc).HasColumnName("generated_at_utc");
+                eb.Property(x => x.ReviewedAtUtc).HasColumnName("reviewed_at_utc");
+                eb.Property(x => x.DesignFingerprint).HasColumnName("design_fingerprint").HasMaxLength(128);
+                eb.Property(x => x.LoadTestApproved).HasColumnName("load_test_approved");
+                eb.Property(x => x.LoadTestConfigJson).HasColumnName("load_test_config_json").HasColumnType("jsonb");
+                eb.HasIndex(x => x.GeneratedAtUtc);
+            });
+            modelBuilder.Entity<QaTestCase>(eb =>
+            {
+                eb.ToTable("qa_test_cases", "public"); eb.HasKey(x => x.Id);
+                eb.Property(x => x.Id).HasColumnName("id"); eb.Property(x => x.PlanId).HasColumnName("plan_id");
+                eb.Property(x => x.ModuleCode).HasColumnName("module_code").HasMaxLength(64);
+                eb.Property(x => x.TestKey).HasColumnName("test_key").HasMaxLength(160);
+                eb.Property(x => x.Title).HasColumnName("title").HasMaxLength(240);
+                eb.Property(x => x.Objective).HasColumnName("objective"); eb.Property(x => x.Preconditions).HasColumnName("preconditions");
+                eb.Property(x => x.StepsJson).HasColumnName("steps_json").HasColumnType("jsonb");
+                eb.Property(x => x.ExpectedResult).HasColumnName("expected_result"); eb.Property(x => x.Severity).HasColumnName("severity").HasMaxLength(24);
+                eb.Property(x => x.ExecutorType).HasColumnName("executor_type").HasMaxLength(40);
+                eb.Property(x => x.ExecutorSpecJson).HasColumnName("executor_spec_json").HasColumnType("jsonb");
+                eb.Property(x => x.ScenarioType).HasColumnName("scenario_type").HasMaxLength(16);
+                eb.Property(x => x.TestDataJson).HasColumnName("test_data_json").HasColumnType("jsonb");
+                eb.Property(x => x.TestDataApproved).HasColumnName("test_data_approved");
+                eb.Property(x => x.Approved).HasColumnName("approved"); eb.Property(x => x.ReviewerNotes).HasColumnName("reviewer_notes");
+                eb.Property(x => x.DisplayOrder).HasColumnName("display_order");
+                eb.HasOne(x => x.Plan).WithMany(x => x.Cases).HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Cascade);
+                eb.HasIndex(x => x.PlanId); eb.HasIndex(x => new { x.PlanId, x.TestKey }).IsUnique();
+            });
+            modelBuilder.Entity<QaTestFinding>(eb =>
+            {
+                eb.ToTable("qa_test_findings", "public");
+                eb.HasKey(x => x.Id);
+                eb.Property(x => x.Id).HasColumnName("id");
+                eb.Property(x => x.RunId).HasColumnName("run_id");
+                eb.Property(x => x.ModuleCode).HasColumnName("module_code").HasMaxLength(64);
+                eb.Property(x => x.TestKey).HasColumnName("test_key").HasMaxLength(160);
+                eb.Property(x => x.Title).HasColumnName("title").HasMaxLength(240);
+                eb.Property(x => x.Status).HasColumnName("status").HasMaxLength(24);
+                eb.Property(x => x.Severity).HasColumnName("severity").HasMaxLength(24);
+                eb.Property(x => x.Details).HasColumnName("details");
+                eb.Property(x => x.Evidence).HasColumnName("evidence");
+                eb.Property(x => x.Recommendation).HasColumnName("recommendation");
+                eb.Property(x => x.ImpactAnalysis).HasColumnName("impact_analysis");
+                eb.Property(x => x.DurationMs).HasColumnName("duration_ms");
+                eb.HasOne(x => x.Run).WithMany(x => x.Findings).HasForeignKey(x => x.RunId).OnDelete(DeleteBehavior.Cascade);
+                eb.HasIndex(x => x.RunId);
+                eb.HasIndex(x => new { x.ModuleCode, x.Status });
             });
 // -------------------------
             // AdminNotification
@@ -749,7 +1062,7 @@ modelBuilder.Entity<MarriageApplication>(eb =>
       .HasColumnName("credit")
       .HasColumnType("numeric(12,2)");
 
-    // Ã°Å¸â€â€” Relationships
+    // 🔗 Relationships
     eb.HasOne(l => l.JournalEntry)
       .WithMany(j => j.Lines)
       .HasForeignKey(l => l.JournalEntryId)
@@ -867,14 +1180,7 @@ modelBuilder.Entity<MarriageApplication>(eb =>
                 eb.ToTable("users", "public");
                 eb.HasKey(u => u.Id);
                 eb.HasIndex(u => u.UserCode).IsUnique();
-<<<<<<< HEAD
-                eb.HasIndex(u => u.Phone)
-                  .IsUnique()
-                  .HasDatabaseName("ux_users_phone_not_blank")
-                  .HasFilter("phone IS NOT NULL AND btrim(phone) <> ''");
-=======
                 eb.HasIndex(u => u.TenantId);
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
                 eb.Property(u => u.Id).HasColumnName("id");
                 eb.Property(u => u.TenantId).HasColumnName("tenant_id");
                 eb.Property(u => u.UserCode).HasMaxLength(16).ValueGeneratedOnAdd();
@@ -888,6 +1194,12 @@ modelBuilder.Entity<MarriageApplication>(eb =>
                 eb.Property(u => u.LastLogin).HasColumnName("lastlogin");
                 eb.Property(u => u.Phone).HasColumnName("phone");
                 eb.Property(u => u.Role).HasColumnName("role");
+                eb.Property(u => u.PreferredLanguage).HasColumnName("preferred_language").HasMaxLength(8);
+                eb.Property(u => u.MfaEnabled).HasColumnName("mfa_enabled").HasDefaultValue(false);
+                eb.Property(u => u.MfaSecret).HasColumnName("mfa_secret").HasMaxLength(64);
+                eb.Property(u => u.MfaPendingSecret).HasColumnName("mfa_pending_secret").HasMaxLength(64);
+                eb.Property(u => u.MfaRecoveryCodes).HasColumnName("mfa_recovery_codes");
+                eb.Property(u => u.MfaEnabledAtUtc).HasColumnName("mfa_enabled_at_utc");
                 eb.HasOne(u => u.Tenant).WithMany().HasForeignKey(u => u.TenantId).OnDelete(DeleteBehavior.Restrict);
             });
 
@@ -991,6 +1303,10 @@ modelBuilder.Entity<MarriageApplication>(eb =>
                 eb.Property(p => p.HourlyRate)
                   .HasColumnName("hourly_rate")
                   .HasColumnType("numeric(18,2)");
+
+                eb.Property(p => p.WeeklyOffDay)
+                  .HasColumnName("weekly_off_day")
+                  .HasDefaultValue(0);
 
                 eb.Property(p => p.MonthlyFixedAmount)
                   .HasColumnName("monthly_fixed_amount")
@@ -1123,10 +1439,7 @@ modelBuilder.Entity<MarriageApplication>(eb =>
                 eb.Property(c => c.CreatedBy).HasColumnName("createdby");
                 eb.Property(c => c.CreatedAt).HasColumnName("createdat");
                 eb.Property(c => c.GroupPhotoUrl).HasColumnName("group_photo_url");
-<<<<<<< HEAD
-=======
                 eb.HasIndex(c => c.TenantId);
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 
                 eb.HasOne(c => c.Creator)
                   .WithMany()
@@ -1539,6 +1852,20 @@ modelBuilder.Entity<MarriageApplication>(eb =>
             });
 
             base.OnModelCreating(modelBuilder);
+        }
+
+        private static void ConfigureMarketing(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<MarketingProspect>(e => { e.ToTable("marketing_prospects"); e.HasKey(x => x.Id); e.HasIndex(x => x.PublicEmail); e.HasIndex(x => new { x.Status, x.DoNotContact }); e.HasIndex(x => x.Country); });
+            modelBuilder.Entity<MarketingCampaign>(e => { e.ToTable("marketing_campaigns"); e.HasKey(x => x.Id); e.Property(x => x.ChannelsJson).HasColumnType("jsonb"); e.Property(x => x.AudienceJson).HasColumnType("jsonb"); e.Property(x => x.WhatsAppContentVariablesJson).HasColumnType("jsonb"); e.HasIndex(x => new { x.Status, x.NextRunAtUtc }); });
+            modelBuilder.Entity<WhatsAppContactState>(e => { e.ToTable("whatsapp_contact_states"); e.HasKey(x => x.PhoneE164); e.HasIndex(x => x.LastInboundMessageSid).IsUnique().HasFilter("\"LastInboundMessageSid\" IS NOT NULL"); });
+            modelBuilder.Entity<MarketingOutreach>(e => { e.ToTable("marketing_outreach"); e.HasKey(x => x.Id); e.HasOne(x => x.Campaign).WithMany(x => x.Outreach).HasForeignKey(x => x.CampaignId).OnDelete(DeleteBehavior.Cascade); e.HasOne(x => x.Prospect).WithMany().HasForeignKey(x => x.ProspectId).OnDelete(DeleteBehavior.Cascade); e.HasIndex(x => new { x.CampaignId, x.ProspectId, x.Channel, x.AttemptNumber }).IsUnique(); e.HasIndex(x => new { x.Status, x.AttemptedAtUtc }); e.HasIndex(x => new { x.Channel, x.Status }); });
+            modelBuilder.Entity<MarketingCommunicationEvent>(e => { e.ToTable("marketing_communication_events"); e.HasKey(x => x.Id); e.Property(x => x.MetadataJson).HasColumnType("jsonb"); e.HasOne(x => x.Outreach).WithMany(x => x.Events).HasForeignKey(x => x.OutreachId).OnDelete(DeleteBehavior.Cascade); e.HasIndex(x => new { x.OutreachId, x.EventAtUtc }); e.HasIndex(x => x.ProviderEventId); });
+            modelBuilder.Entity<MarketingLead>(e => { e.ToTable("marketing_leads"); e.HasKey(x => x.Id); e.HasOne(x => x.Prospect).WithMany().HasForeignKey(x => x.ProspectId).OnDelete(DeleteBehavior.Restrict); e.HasIndex(x => x.ProspectId).IsUnique(); });
+            modelBuilder.Entity<MarketingQuote>(e => { e.ToTable("marketing_quotes"); e.HasKey(x => x.Id); e.Property(x => x.Amount).HasColumnType("numeric(14,2)"); e.Property(x => x.LineItemsJson).HasColumnType("jsonb"); e.HasIndex(x => x.QuoteNumber).IsUnique(); e.HasIndex(x => x.AcceptanceToken).IsUnique(); e.HasOne(x => x.Lead).WithMany(x => x.Quotes).HasForeignKey(x => x.LeadId).OnDelete(DeleteBehavior.Cascade); });
+            modelBuilder.Entity<MarketingOrder>(e => { e.ToTable("marketing_orders"); e.HasKey(x => x.Id); e.HasIndex(x => x.QuoteId).IsUnique(); e.HasOne(x => x.Quote).WithOne(x => x.Order).HasForeignKey<MarketingOrder>(x => x.QuoteId).OnDelete(DeleteBehavior.Cascade); e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.SetNull); });
+            modelBuilder.Entity<MarketingDiscoverySchedule>(e => { e.ToTable("marketing_discovery_schedules"); e.HasKey(x => x.Id); e.HasIndex(x => new { x.Enabled, x.NextRunAtUtc }); });
+            modelBuilder.Entity<MarketingDiscoveryRun>(e => { e.ToTable("marketing_discovery_runs"); e.HasKey(x => x.Id); e.HasOne(x => x.Schedule).WithMany().HasForeignKey(x => x.ScheduleId).OnDelete(DeleteBehavior.SetNull); e.HasIndex(x => x.StartedAtUtc); });
         }
     }
 }

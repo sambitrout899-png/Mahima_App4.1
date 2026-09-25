@@ -31,7 +31,7 @@ namespace Mahima.Api.v3.clean.Controllers
         }
 
         // --------------------------------------------------------------------
-        // 1) REBUILD ANALYTICS (placeholder â€“ using live data)
+        // 1) REBUILD ANALYTICS (placeholder – using live data)
         // --------------------------------------------------------------------
         [HttpPost("rebuild")]
         public IActionResult RebuildAnalytics()
@@ -357,21 +357,16 @@ namespace Mahima.Api.v3.clean.Controllers
             var from30 = now.AddDays(-30);
             var tenantId = await GetCurrentTenantIdAsync();
 
-<<<<<<< HEAD
             var rolesLookup = await _db.Roles
                 .Select(r => new { r.Id, r.Name })
                 .ToDictionaryAsync(r => r.Id.ToString(), r => r.Name ?? string.Empty);
 
             var rawUsersByRole = await _db.Users
-=======
-            var usersByRole = await _db.Users
                 .Where(u => u.TenantId == tenantId)
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
                 .GroupBy(u => u.Role ?? "Unassigned")
                 .Select(g => new { role = g.Key, count = g.Count() })
                 .ToListAsync();
 
-<<<<<<< HEAD
             var usersByRole = rawUsersByRole
                 .GroupBy(x => NormalizeRoleLabel(x.role, rolesLookup))
                 .Select(g => new { role = g.Key, count = g.Sum(x => x.count) })
@@ -379,15 +374,11 @@ namespace Mahima.Api.v3.clean.Controllers
                 .ToList();
 
             var rawTaskStatus = await _db.Tasks
-=======
-            var taskStatus = await _db.Tasks
                 .Where(t => t.TenantId == tenantId)
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
                 .GroupBy(t => t.Status)
                 .Select(g => new { status = g.Key, count = g.Count() })
                 .ToListAsync();
 
-<<<<<<< HEAD
             var taskStatus = rawTaskStatus
                 .GroupBy(x => NormalizeTaskStatusLabel(x.status))
                 .Select(g => new { status = g.Key, count = g.Sum(x => x.count) })
@@ -395,29 +386,20 @@ namespace Mahima.Api.v3.clean.Controllers
                 .ToList();
 
             var rawTaskPriority = await _db.Tasks
-=======
-            var taskPriority = await _db.Tasks
                 .Where(t => t.TenantId == tenantId)
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
                 .GroupBy(t => t.Priority)
                 .Select(g => new { priority = g.Key, count = g.Count() })
                 .ToListAsync();
 
-<<<<<<< HEAD
             var taskPriority = rawTaskPriority
                 .Select(x => new { priority = NormalizeTaskPriorityLabel(x.priority), count = x.count })
                 .ToList();
 
-            var recentMessages = await _db.Messages.CountAsync(m => m.CreatedAt >= from30);
-            var totalChats = await _db.Chats.CountAsync();
-            var groupChats = await _db.Chats.CountAsync(c => c.IsGroup);
-=======
             var recentMessages = await _db.Messages
                 .Include(m => m.Chat)
                 .CountAsync(m => m.Chat != null && m.Chat.TenantId == tenantId && m.CreatedAt >= from30);
             var totalChats = await _db.Chats.CountAsync(c => c.TenantId == tenantId);
             var groupChats = await _db.Chats.CountAsync(c => c.TenantId == tenantId && c.IsGroup);
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 
             var journalLines = await _db.JournalLines
                 .Include(l => l.Account)

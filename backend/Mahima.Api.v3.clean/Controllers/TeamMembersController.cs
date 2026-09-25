@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -373,16 +373,14 @@ WHERE ""Id"" = @teamId AND ""LeadUserId"" = @userId;";
             await using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync();
 
-<<<<<<< HEAD
-            await using var tx = await conn.BeginTransactionAsync();
-=======
             if (!await TeamBelongsToTenantAsync(conn, teamLong))
                 return NotFound();
 
             var validUsers = await LoadTenantUserIdsAsync(conn, new[] { userGuid });
             if (!validUsers.Contains(userGuid))
                 return NotFound();
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
+
+            await using var tx = await conn.BeginTransactionAsync();
 
             await using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;

@@ -1,14 +1,8 @@
 ﻿// src/main.jsx
 // Native Android bootstrap: create notification channels + register FCM.
-<<<<<<< HEAD
-// Must run before anything else so channels exist before any notification fires.
-import { initNativeApp } from "./utils/initNativeApp";
-initNativeApp(); // fire-and-forget; returns a Promise, intentionally not awaited
-=======
 // Deferred so the login UI renders first before we request any permissions.
 import { initNativeApp } from "./utils/initNativeApp";
 window.addEventListener("load", () => setTimeout(initNativeApp, 2000));
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 import "./utils/fetch-auth-shim";   // <-- add this line first
 import "./mobileUI.css";
 import React from 'react'
@@ -21,6 +15,42 @@ import './index.css'
 import axios from 'axios'
 import { API_BASE } from './api'
 import { LanguageProvider } from './i18n/LanguageContext'
+import { mobileClientHeaders } from './utils/mobileAccessPolicy'
+import GlobalNotifications from './components/GlobalNotifications'
+import { notifyError, notifySuccess, defaultActionMessage } from './utils/notifications'
+
+function normalizeDuplicateApiPath(value) {
+  return typeof value === 'string'
+    ? value.replace(/\/api(?:\/api)+(?=\/|[?#]|$)/gi, '/api')
+    : value
+}
+
+function installDuplicateApiPathGuard() {
+  try {
+    if (window.__mahimaDuplicateApiPathGuardInstalled) return
+    window.__mahimaDuplicateApiPathGuardInstalled = true
+
+    const nativeFetch = window.fetch.bind(window)
+    window.fetch = (input, init) => {
+      if (typeof input === 'string') {
+        return nativeFetch(normalizeDuplicateApiPath(input), init)
+      }
+
+      if (input instanceof Request) {
+        const normalizedUrl = normalizeDuplicateApiPath(input.url)
+        if (normalizedUrl !== input.url) {
+          return nativeFetch(new Request(normalizedUrl, input), init)
+        }
+      }
+
+      return nativeFetch(input, init)
+    }
+  } catch (error) {
+    console.warn('Failed to install duplicate API path guard', error)
+  }
+}
+
+installDuplicateApiPathGuard()
 
 // ✅ Create the QueryClient (used by react-query)
 const qc = new QueryClient()
@@ -28,10 +58,13 @@ const qc = new QueryClient()
 // ---------- Axios: Global Auth Interceptor ----------
 function attachAxiosAuthInterceptor() {
   try {
+    if (window.__mahimaAxiosInterceptorsInstalled) return
+    window.__mahimaAxiosInterceptorsInstalled = true
     axios.interceptors.request.use(
       (config) => {
         try {
-          const url = String(config.url || '')
+          const url = normalizeDuplicateApiPath(String(config.url || ''))
+          config.url = url
           const apiOrigin = (API_BASE || '/api').replace(/\/api\/?$/i, '').replace(/\/+$/, '')
 
           if (url && !/^https?:\/\//i.test(url)) {
@@ -41,11 +74,14 @@ function attachAxiosAuthInterceptor() {
               config.url = `${API_BASE}${url}`
             }
           }
+          config.url = normalizeDuplicateApiPath(config.url)
         } catch (e) {
           console.warn('Axios URL interceptor failed', e)
         }
 
         try {
+          config.headers = config.headers || {}
+          Object.assign(config.headers, mobileClientHeaders())
           // ✅ Primary key: authToken
           let token = localStorage.getItem('authToken')
 
@@ -73,6 +109,19 @@ function attachAxiosAuthInterceptor() {
         return config
       },
       (err) => Promise.reject(err)
+    )
+    axios.interceptors.response.use(
+      (response) => {
+        const method = String(response?.config?.method || 'get').toUpperCase()
+        if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && response?.config?.mahimaNotify !== false) {
+          notifySuccess(response?.config?.successMessage || defaultActionMessage(method, response?.config?.url))
+        }
+        return response
+      },
+      (error) => {
+        if (error?.config?.mahimaNotify !== false) notifyError(error, 'The action could not be completed.')
+        return Promise.reject(error)
+      }
     )
   } catch (e) {
     console.warn('Failed to attach axios interceptor', e)
@@ -146,6 +195,7 @@ createRoot(document.getElementById('root')).render(
       <QueryClientProvider client={qc}>
         <LanguageProvider>
           <AutoLogoutWrapper>
+            <GlobalNotifications />
             <App />
           </AutoLogoutWrapper>
         </LanguageProvider>

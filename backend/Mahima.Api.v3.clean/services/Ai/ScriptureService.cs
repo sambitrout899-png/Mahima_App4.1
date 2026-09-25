@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-using System;
-=======
 ﻿using System;
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -17,11 +13,7 @@ namespace Mahima.Api.v3.clean.Services.Ai
     /// a user's question by keyword scoring. Register as a singleton.
     ///
     /// This is deliberately a simple, dependency-free retriever (no embeddings,
-<<<<<<< HEAD
-    /// no external service) so the AI Pastor's Scripture grounding works fully
-=======
     /// no external service) so the AI Counseller's Scripture grounding works fully
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
     /// offline alongside a self-hosted model. To upgrade to semantic search
     /// later, swap the scoring in FindRelevant for a vector similarity lookup;
     /// the interface does not change.
@@ -59,11 +51,7 @@ namespace Mahima.Api.v3.clean.Services.Ai
             if (path == null)
             {
                 _logger.LogWarning(
-<<<<<<< HEAD
-                    "scripture_pack.json not found; AI Pastor will run without verse grounding. " +
-=======
                     "scripture_pack.json not found; AI Counseller will run without verse grounding. " +
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
                     "Checked: {Paths}", string.Join("; ", candidates));
                 return;
             }
@@ -169,3 +157,4 @@ namespace Mahima.Api.v3.clean.Services.Ai
         }
     }
 }
+

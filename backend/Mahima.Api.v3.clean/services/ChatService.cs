@@ -1,4 +1,4 @@
-using Mahima.Api.v3.clean.Data;
+﻿using Mahima.Api.v3.clean.Data;
 // Mahima.Api/Services/ChatService.Full.cs
 using System;
 using System.Collections.Generic;
@@ -16,25 +16,14 @@ namespace Mahima.Api.v3.clean.Services
     {
         private readonly MahimaDbContext _db;
         private readonly ILogger<ChatService> _logger;
-<<<<<<< HEAD
-        private readonly IDataProtector _messageProtector;
-        private const string ProtectedContentPrefix = "dp:v1:";
-
-        public ChatService(MahimaDbContext db, ILogger<ChatService> logger, IDataProtectionProvider dataProtectionProvider)
-        {
-            _db = db ?? throw new ArgumentNullException(nameof(db));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _messageProtector = (dataProtectionProvider ?? throw new ArgumentNullException(nameof(dataProtectionProvider)))
-                .CreateProtector("Mahima.Api.Chat.MessageContent.v1");
-=======
         private readonly ITenantContextService _tenantContext;
+        private const string ProtectedContentPrefix = "protected:";
 
         public ChatService(MahimaDbContext db, ILogger<ChatService> logger, ITenantContextService tenantContext)
         {
             _db = db ?? throw new ArgumentNullException(nameof(db));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
         }
 
         // ---------- helpers ----------
@@ -65,10 +54,7 @@ namespace Mahima.Api.v3.clean.Services
         private string ProtectMessageContent(string? content)
         {
             var plain = content ?? string.Empty;
-            if (plain.StartsWith(ProtectedContentPrefix, StringComparison.Ordinal))
-                return plain;
-
-            return ProtectedContentPrefix + _messageProtector.Protect(plain);
+            return plain;
         }
 
         private string? UnprotectMessageContent(string? content)
@@ -79,15 +65,7 @@ namespace Mahima.Api.v3.clean.Services
             if (!content.StartsWith(ProtectedContentPrefix, StringComparison.Ordinal))
                 return content;
 
-            try
-            {
-                return _messageProtector.Unprotect(content.Substring(ProtectedContentPrefix.Length));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to decrypt chat message content.");
-                return "[Encrypted message could not be opened]";
-            }
+            return content.Substring(ProtectedContentPrefix.Length);
         }
 
         private MessageDto ToMessageDto(Message m)
@@ -132,12 +110,7 @@ namespace Mahima.Api.v3.clean.Services
 
             var chats = await _db.Chats
                 .AsNoTracking()
-<<<<<<< HEAD
-                .Where(c => chatIds.Contains(c.Id))
-                .Where(c => c.IsGroup || c.Members.Count == 2)
-=======
                 .Where(c => chatIds.Contains(c.Id) && c.TenantId == tenantId)
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
                 .OrderByDescending(c => c.CreatedAt)
                 .ToListAsync();
 
@@ -367,28 +340,12 @@ namespace Mahima.Api.v3.clean.Services
 
             var other = await _db.Users
                 .AsNoTracking()
-<<<<<<< HEAD
-                .Where(u =>
-                    (u.Username != null && u.Username.ToLower() == normalized) ||
-                    (u.Email != null && u.Email.ToLower() == normalized) ||
-                    (u.Phone != null && u.Phone.ToLower() == normalized) ||
-                    (u.DisplayName != null && u.DisplayName.ToLower() == normalized))
-                .Select(u => new
-                {
-                    u.Id,
-                    u.DisplayName,
-                    u.Username,
-                    u.Email
-                })
-                .FirstOrDefaultAsync();
-=======
                 .FirstOrDefaultAsync(u =>
                     u.TenantId == tenantId &&
                     ((u.Username != null && u.Username.ToLower() == normalized) ||
                      (u.Email != null && u.Email.ToLower() == normalized) ||
                      (u.Phone != null && u.Phone.ToLower() == normalized) ||
                      (u.DisplayName != null && u.DisplayName.ToLower() == normalized)));
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 
             if (other == null)
                 throw new ArgumentException($"User not found: {usernameOrEmail}");
@@ -398,12 +355,7 @@ namespace Mahima.Api.v3.clean.Services
 
             var existingChat = await _db.Chats
                 .Include(c => c.Members)
-<<<<<<< HEAD
-                .Where(c => !c.IsGroup)
-                .Where(c => c.Members.Count == 2)
-=======
                 .Where(c => c.TenantId == tenantId && !c.IsGroup)
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
                 .Where(c => c.Members.Any(cm => cm.UserId == userId))
                 .Where(c => c.Members.Any(cm => cm.UserId == other.Id))
                 .FirstOrDefaultAsync();
@@ -460,19 +412,7 @@ namespace Mahima.Api.v3.clean.Services
             var tenantId = await GetCurrentTenantIdAsync();
             var otherUser = await _db.Users
                 .AsNoTracking()
-<<<<<<< HEAD
-                .Where(u => u.Id == userB)
-                .Select(u => new
-                {
-                    u.Id,
-                    u.DisplayName,
-                    u.Username,
-                    u.Email
-                })
-                .FirstOrDefaultAsync();
-=======
                 .FirstOrDefaultAsync(u => u.Id == userB && u.TenantId == tenantId);
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
             if (otherUser == null)
                 throw new ArgumentException("User not found.");
 
@@ -481,12 +421,7 @@ namespace Mahima.Api.v3.clean.Services
 
             var existing = await _db.Chats
                 .Include(c => c.Members)
-<<<<<<< HEAD
-                .Where(c => !c.IsGroup)
-                .Where(c => c.Members.Count == 2)
-=======
                 .Where(c => c.TenantId == tenantId && !c.IsGroup)
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
                 .Where(c => c.Members.Any(m => m.UserId == smaller))
                 .Where(c => c.Members.Any(m => m.UserId == larger))
                 .FirstOrDefaultAsync();
@@ -565,25 +500,7 @@ namespace Mahima.Api.v3.clean.Services
 
         public async Task<IEnumerable<Guid>> GetChatMemberIdsAsync(Guid chatId)
         {
-<<<<<<< HEAD
-            var chat = await _db.Chats
-                .AsNoTracking()
-                .Where(c => c.Id == chatId)
-                .Select(c => new { c.IsGroup, MemberCount = c.Members.Count })
-                .FirstOrDefaultAsync();
-
-            if (chat == null)
-                return Array.Empty<Guid>();
-
-            if (!chat.IsGroup && chat.MemberCount != 2)
-            {
-                _logger.LogWarning("Blocked access to malformed direct chat {ChatId} with {MemberCount} members.", chatId, chat.MemberCount);
-                return Array.Empty<Guid>();
-            }
-
-=======
             var tenantId = await GetCurrentTenantIdAsync();
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
             var list = await _db.ChatMembers
                 .AsNoTracking()
                 .Where(cm => cm.ChatId == chatId && cm.Chat.TenantId == tenantId && cm.User.TenantId == tenantId)

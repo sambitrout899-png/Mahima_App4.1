@@ -1,4 +1,4 @@
-// Controllers/AttendanceController.cs
+﻿// Controllers/AttendanceController.cs
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -41,24 +41,17 @@ namespace Mahima.Api.Controllers
 
         private string? GetActorIdString() => GetActorId()?.ToString();
 
-<<<<<<< HEAD
-        private bool HasAnyRole(params string[] roles)
-        {
-            var allowed = roles
-                .Select(r => r.Trim().ToLowerInvariant())
-                .Where(r => !string.IsNullOrWhiteSpace(r))
-                .ToHashSet();
-=======
         private Guid GetCurrentTenantId() =>
             Guid.TryParse(User.FindFirstValue("tenant_id"), out var id)
                 ? id
                 : RootTenantId;
 
-       // private bool IsAdmin()
-       // {
-         //   if (User.IsInRole("Admin") || User.IsInRole("Administrator"))
-            //    return true;
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
+        private bool HasAnyRole(params string[] roles)
+        {
+            var allowed = roles
+                .Where(role => !string.IsNullOrWhiteSpace(role))
+                .Select(role => role.Trim().ToLowerInvariant())
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             if (allowed.Count == 0)
                 return false;
@@ -74,7 +67,22 @@ namespace Mahima.Api.Controllers
             return roleClaims.Any(role => allowed.Contains(role!));
         }
 
+        private bool IsAdmin() => HasAnyRole("admin", "administrator");
+
         private bool CanManageOthers() => HasAnyRole("admin", "administrator", "finance");
+
+        private static readonly HashSet<string> AllowedStatuses = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Present", "Absent", "Half-day", "WFH", "Weekend",
+            "Leave (Standard)", "Leave (Medical)", "Leave (Casual)"
+        };
+
+        private static string NormalizeStatus(string? status)
+        {
+            var value = status?.Trim() ?? string.Empty;
+            // Preserve old records/forms while moving them to the explicit standard category.
+            return value.Equals("Leave", StringComparison.OrdinalIgnoreCase) ? "Leave (Standard)" : value;
+        }
 
         private bool IsActor(string? userId)
         {
@@ -165,14 +173,20 @@ namespace Mahima.Api.Controllers
             if (string.IsNullOrWhiteSpace(dto.UserId))
                 return BadRequest("UserId is required.");
 
-<<<<<<< HEAD
             if (!canManageOthers && !IsActor(dto.UserId))
                 return Forbid();
 
-=======
             dto.TenantId = GetCurrentTenantId();
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
             dto.Date = DateTime.SpecifyKind(dto.Date, DateTimeKind.Unspecified);
+            dto.Status = NormalizeStatus(dto.Status);
+            if (!AllowedStatuses.Contains(dto.Status))
+                return BadRequest(new { message = "Choose a valid attendance or leave category." });
+
+            var nextDate = dto.Date.Date.AddDays(1);
+            var duplicate = await _db.AttendanceRecords.AnyAsync(a =>
+                a.TenantId == dto.TenantId && a.UserId == dto.UserId && a.Date >= dto.Date.Date && a.Date < nextDate);
+            if (duplicate)
+                return Conflict(new { message = "Attendance is already marked for this staff member and date." });
 
             _db.AttendanceRecords.Add(dto);
             await _db.SaveChangesAsync();   // generate Id
@@ -224,7 +238,10 @@ namespace Mahima.Api.Controllers
                 existing.UserId = dto.UserId;
 
             existing.Date = DateTime.SpecifyKind(dto.Date, DateTimeKind.Unspecified);
-            existing.Status = dto.Status;
+            var normalizedStatus = NormalizeStatus(dto.Status);
+            if (!AllowedStatuses.Contains(normalizedStatus))
+                return BadRequest(new { message = "Choose a valid attendance or leave category." });
+            existing.Status = normalizedStatus;
 
             var after = new
             {

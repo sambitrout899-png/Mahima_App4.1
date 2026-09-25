@@ -1,12 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import { Download, RefreshCw, X } from "lucide-react";
-<<<<<<< HEAD
-import mahimaLogo from "../assets/mahima-logo.png";
-import { API_BASE } from "../api";
-=======
 import { API_BASE } from "../api";
 import TenantLogo from "./TenantLogo";
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 
 function isNativeAppMode() {
   try {
@@ -92,7 +87,7 @@ export default function AppUpdatePrompt() {
     let cancelled = false;
 
     const urls = [
-      `${String(API_BASE || "https://mahimaministries.in/api").replace(/\/+$/, "")}/app-releases/latest?t=${Date.now()}`,
+      `${String(API_BASE || "https://beta.mahimaministries.in/api").replace(/\/+$/, "")}/app-releases/latest?t=${Date.now()}`,
       `https://mahimaministries.in/app-version.json?t=${Date.now()}`,
     ];
 

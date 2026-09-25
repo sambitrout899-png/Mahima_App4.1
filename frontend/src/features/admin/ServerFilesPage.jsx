@@ -413,17 +413,7 @@ export default function ServerFilesPage() {
     setMessage("");
 
     try {
-<<<<<<< HEAD
-      const entriesToTransfer = selectedEntries.filter(
-        (entry) => !selectedEntries.some(
-          (candidate) => candidate.isDirectory && candidate.path !== entry.path && isChildPath(candidate.path, entry.path)
-        )
-      );
-
-      for (const entry of entriesToTransfer) {
-=======
       for (const entry of selectedEntries) {
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
         await apiFetch(`/server-files/${transferModal}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -433,11 +423,7 @@ export default function ServerFilesPage() {
           }),
         });
       }
-<<<<<<< HEAD
-      setMessage(`${entriesToTransfer.length} item${entriesToTransfer.length === 1 ? "" : "s"} ${transferModal === "copy" ? "copied" : "moved"}.`);
-=======
       setMessage(`${selectedEntries.length} item${selectedEntries.length === 1 ? "" : "s"} ${transferModal === "copy" ? "copied" : "moved"}.`);
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
       setTransferModal(null);
       await load(currentPath);
     } catch (err) {
@@ -555,14 +541,18 @@ export default function ServerFilesPage() {
     >
       <div className="mx-auto max-w-[1500px] space-y-5">
         <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex flex-col gap-4 border-b border-slate-100 px-5 py-5 xl:flex-row xl:items-center xl:justify-between">
+          <header
+            id="mahima-server-files-page-header"
+            className="mahima-standard-page-header mahima-standard-page-header-attached flex flex-col gap-4 border-b border-slate-100 px-5 py-5 xl:flex-row xl:items-center xl:justify-between"
+            data-mahima-explicit-header="true"
+          >
             <div className="min-w-0">
               <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">
                 <ShieldCheck className="h-4 w-4" />
                 Admin File Workspace
               </div>
-              <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">Server Files</h1>
-              <p className="mt-1 max-w-3xl text-sm font-semibold text-slate-500">
+              <h1 className="mahima-standard-page-title mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl" data-mahima-explicit-title="true">Server Files</h1>
+              <p className="mahima-standard-page-subtitle mt-1 max-w-3xl text-sm font-semibold text-slate-500">
                 Manage backend download files with a SharePoint-style workspace: folders, search, upload queue, downloads, rename, and delete.
               </p>
             </div>
@@ -628,7 +618,7 @@ export default function ServerFilesPage() {
               className="hidden"
               onChange={(event) => uploadFiles(event.target.files)}
             />
-          </div>
+          </header>
 
           <div className="grid gap-3 px-5 py-4 lg:grid-cols-[1fr_auto] lg:items-center">
             <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-bold text-slate-600">

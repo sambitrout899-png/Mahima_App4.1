@@ -25,27 +25,38 @@ import EmailClientPage from "./features/admin/EmailClientPage";
 import GoogleDrivePage from "./features/admin/GoogleDrivePage";
 import AdminLanguages from "./features/admin/AdminLanguages";
 import ServerFilesPage from "./features/admin/ServerFilesPage";
-<<<<<<< HEAD
 import ReportsPage from "./features/admin/ReportsPage";
 import AuditTrailPage from "./features/admin/AuditTrailPage";
-=======
 import MultiTenantAdminPage from "./features/admin/MultiTenantAdminPage";
+import TenantDashboardPage from "./features/admin/TenantDashboardPage";
 import TenantLandingEditorPage from "./features/admin/TenantLandingEditorPage";
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
+import TenantPrintTemplatesPage from "./features/admin/TenantPrintTemplatesPage";
 import PastorPage from "./features/pastor/PastorPage";
+import PastorDashboard from "./features/pastor/PastorDashboard";
 import ReadMePage from "./features/pastor/ReadMePage";
 import AppDownloadsPage from "./features/downloads/AppDownloadsPage";
 import HomeLanding from "./features/home/HomeLanding";
 import MembersPage from "./features/teams/MembersPage";
 import SermonsPage from "./features/sermons/SermonsPage";
+import EventsPage from "./features/events/EventsPage";
+import CheckInPage from "./features/checkin/CheckInPage";
+import VolunteerSchedulingPage from "./features/volunteers/VolunteerSchedulingPage";
+import ServicePlansPage from "./features/worship/ServicePlansPage";
+import SecuritySettingsPage from "./features/auth/SecuritySettingsPage";
 import { getToken } from "./features/auth/authService";
 import { setAuthToken } from "./api";
 import AppUpdatePrompt from "./components/AppUpdatePrompt";
 import { getCurrentUser } from "./features/auth/permissionService";
 import { fetchTenantEntitlements, pageIsLicensed } from "./licensing";
 import SaasLandingPage from "./features/saas/SaasLandingPage";
+import MarketingHome from "./features/marketing/MarketingHome";
 import SubscriptionsPage from "./features/saas/SubscriptionsPage";
 import BillingCenterPage from "./features/saas/BillingCenterPage";
+import QaAutomationPage from "./features/admin/QaAutomationPage";
+import DigitalMarketingPage from "./features/admin/DigitalMarketingPage";
+import BiblePage from "./features/bible/BiblePage";
+import UserManualPage from "./features/manual/UserManualPage";
+import { isMobileAppMode, isPageAvailableInMobile } from "./utils/mobileAccessPolicy";
 
 /* ---------------- AUTH ---------------- */
 function RequireAuth({ children }) {
@@ -56,17 +67,6 @@ function RequireAuth({ children }) {
   return children;
 }
 
-function isMobileAppMode() {
-  try {
-    return (
-      import.meta.env.MODE === "mobile" ||
-      Boolean(window.Capacitor?.isNativePlatform?.())
-    );
-  } catch {
-    return false;
-  }
-}
-
 function LandingRoute() {
   const token =
     localStorage.getItem("mahima_token") ||
@@ -74,11 +74,11 @@ function LandingRoute() {
     localStorage.getItem("token") ||
     getToken();
 
-  if (isMobileAppMode() && token) {
-    return <Navigate to="/home" replace />;
+  if (isMobileAppMode()) {
+    return <Navigate to={token ? "/home" : "/login"} replace />;
   }
 
-  return <HomeLanding />;
+  return <MarketingHome />;
 }
 
 function TenantLandingRoute() {
@@ -101,7 +101,7 @@ function isRootTenantUser(user) {
   return user?.isRootTenant === true || user?.IsRootTenant === true || tenantId === ROOT_TENANT_ID;
 }
 
-function RequireRole({ allowedRoles = [], requiredPage = null, strictPage = false, rootOnly = false, children }) {
+function RequireRole({ allowedRoles = [], requiredPage = null, strictPage = false, rootOnly = false, exactRole = null, children }) {
   const [user, setUser] = useState(() => {
     try { return JSON.parse(localStorage.getItem("mahima_user") || "null"); }
     catch { return null; }
@@ -138,10 +138,15 @@ function RequireRole({ allowedRoles = [], requiredPage = null, strictPage = fals
   if (!user) return <Navigate to="/login" replace />;
 
   const role = (user.role || "").toLowerCase();
+  if (exactRole && role !== String(exactRole).toLowerCase()) return <Navigate to="/home" replace />;
   const pages = Array.isArray(user.pages)
     ? user.pages.map((page) => String(page).toUpperCase())
     : [];
   const pageKey = requiredPage ? String(requiredPage).toUpperCase() : null;
+
+  if (pageKey && !isPageAvailableInMobile(pageKey)) {
+    return <Navigate to="/home" replace />;
+  }
 
   if (rootOnly && !isRootTenantUser(user)) return <Navigate to="/home" replace />;
 
@@ -187,12 +192,13 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/app-downloads" element={<AppDownloadsPage publicMode />} />
+      <Route path="/t/:tenantSlug/app-downloads" element={<AppDownloadsPage publicMode />} />
       {/* NOTE: removed standalone <Route path="/sermons" element={<SermonsPage />}/>.
           It used to win over the redirect below, rendering Sermons without the
           Layout shell (no topbar, no sidebar). The bottom redirect now fires
           and sends users to /home/sermons where the Layout wraps the page. */}
 
-      {/* PROTECTED AREA � wrapped in <Layout /> which provides topbar + sidebar */}
+      {/* PROTECTED AREA — wrapped in <Layout /> which provides topbar + sidebar */}
       <Route
         path="/home/*"
         element={
@@ -204,21 +210,12 @@ export default function App() {
         {/* Default */}
         <Route index element={<HomeLanding />} />
         <Route path="home" element={<HomeLanding />} />
-<<<<<<< HEAD
-        <Route
-          path="app-downloads"
-          element={
-            <RequireRole requiredPage="APP_DOWNLOADS" strictPage>
-=======
         <Route path="subscriptions" element={<SubscriptionsPage />} />
+        <Route path="bible" element={<BiblePage />} />
+        <Route path="user-manual" element={<UserManualPage />} />
         <Route
           path="app-downloads"
-          element={
-            <RequireRole allowedRoles={["admin", "staff", "member"]} requiredPage="APP_DOWNLOADS">
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
-              <AppDownloadsPage />
-            </RequireRole>
-          }
+          element={<AppDownloadsPage />}
         />
 
         {/* Admin */}
@@ -236,6 +233,15 @@ export default function App() {
           element={
             <RequireRole allowedRoles={["admin", "staff", "member"]} requiredPage="CHAT">
               <ChatPage />
+            </RequireRole>
+          }
+        />
+
+        <Route
+          path="pastor-dashboard"
+          element={
+            <RequireRole allowedRoles={["pastor"]} requiredPage="DASHBOARD" exactRole="pastor">
+              <PastorDashboard />
             </RequireRole>
           }
         />
@@ -359,7 +365,7 @@ export default function App() {
         <Route
           path="admin/reports"
           element={
-            <RequireRole requiredPage="REPORTS" strictPage>
+            <RequireRole allowedRoles={["admin"]} requiredPage="REPORTS" strictPage rootOnly>
               <ReportsPage />
             </RequireRole>
           }
@@ -389,6 +395,14 @@ export default function App() {
           }
         />
         <Route
+          path="admin/tenant-dashboard"
+          element={
+            <RequireRole allowedRoles={["admin"]} requiredPage="TENANT_DASHBOARD" rootOnly>
+              <TenantDashboardPage />
+            </RequireRole>
+          }
+        />
+        <Route
           path="admin/billing"
           element={
             <RequireRole allowedRoles={["admin"]} requiredPage="SAAS_BILLING" rootOnly>
@@ -397,10 +411,34 @@ export default function App() {
           }
         />
         <Route
+          path="admin/test-automation"
+          element={
+            <RequireRole allowedRoles={["admin"]} requiredPage="QA_AUTOMATION" rootOnly>
+              <QaAutomationPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="admin/digital-marketing"
+          element={
+            <RequireRole allowedRoles={["admin"]} requiredPage="DIGITAL_MARKETING" rootOnly>
+              <DigitalMarketingPage />
+            </RequireRole>
+          }
+        />
+        <Route
           path="admin/landing"
           element={
             <RequireRole allowedRoles={["admin"]} requiredPage="LANDING_PAGE">
               <TenantLandingEditorPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="admin/print-templates"
+          element={
+            <RequireRole allowedRoles={["admin"]} requiredPage="LANDING_PAGE">
+              <TenantPrintTemplatesPage />
             </RequireRole>
           }
         />
@@ -423,7 +461,7 @@ export default function App() {
           path="project-management"
           element={
             <RequireRole
-              allowedRoles={["admin", "staff"]}
+              allowedRoles={["admin", "staff", "callcentermanager", "call center manager", "call centre manager"]}
               requiredPage="PROJECT_MANAGEMENT"
             >
               <ProjectManagementPage />
@@ -440,6 +478,45 @@ export default function App() {
               requiredPage="PRAYER_REQUESTS"
             >
               <PrayerRequestsPage />
+            </RequireRole>
+          }
+        />
+
+        {/* Events */}
+        <Route
+          path="events"
+          element={
+            <RequireRole
+              allowedRoles={["admin", "staff", "member", "volunteer", "pastor"]}
+              requiredPage="EVENTS"
+            >
+              <EventsPage />
+            </RequireRole>
+          }
+        />
+
+        {/* Volunteer Scheduling */}
+        <Route
+          path="volunteers"
+          element={
+            <RequireRole
+              allowedRoles={["admin", "staff", "member", "volunteer"]}
+              requiredPage="VOLUNTEERS"
+            >
+              <VolunteerSchedulingPage />
+            </RequireRole>
+          }
+        />
+
+        {/* Security / MFA settings */}
+        <Route
+          path="security"
+          element={
+            <RequireRole
+              allowedRoles={["admin", "staff", "member", "volunteer", "pastor"]}
+              requiredPage="SECURITY"
+            >
+              <SecuritySettingsPage />
             </RequireRole>
           }
         />
@@ -491,6 +568,28 @@ export default function App() {
             </RequireRole>
           }
         />
+        <Route
+          path="checkin"
+          element={
+            <RequireRole
+              allowedRoles={["admin", "staff", "volunteer"]}
+              requiredPage="CHECKIN"
+            >
+              <CheckInPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="service-plans"
+          element={
+            <RequireRole
+              allowedRoles={["admin", "staff", "pastor"]}
+              requiredPage="SERVICE_PLANS"
+            >
+              <ServicePlansPage />
+            </RequireRole>
+          }
+        />
 
         {/* Costs */}
         <Route
@@ -536,6 +635,7 @@ export default function App() {
       <Route path="/pastor"         element={<Navigate to="/home/pastor"         replace />} />
       <Route path="/readme"         element={<Navigate to="/home/readme"         replace />} />
       <Route path="/downloads"      element={<Navigate to="/app-downloads"       replace />} />
+      <Route path="/user-manual"    element={<Navigate to="/home/user-manual"    replace />} />
 
       {/* FALLBACK */}
       <Route path="*" element={<Navigate to="/" replace />} />
@@ -543,4 +643,3 @@ export default function App() {
     </>
   );
 }
-

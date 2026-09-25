@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-using System.Collections.Generic;
-=======
 ﻿using System.Collections.Generic;
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -11,11 +7,7 @@ namespace Mahima.Api.v3.clean.Services.Ai
     /// <summary>
     /// Provider-agnostic Large Language Model abstraction.
     ///
-<<<<<<< HEAD
-    /// The AI Pastor no longer talks to OpenAI directly. It talks to an
-=======
     /// The AI Counseller no longer talks to OpenAI directly. It talks to an
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
     /// ILlmProvider. The concrete provider is selected by configuration, so the
     /// exact same pastor logic can run on:
     ///   - a fully self-hosted local model (Ollama / LM Studio / vLLM),
@@ -117,3 +109,4 @@ namespace Mahima.Api.v3.clean.Services.Ai
         };
     }
 }
+

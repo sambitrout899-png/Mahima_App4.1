@@ -1,4 +1,4 @@
-// src/features/admin/AdminDashboard.jsx  v3.0
+﻿// src/features/admin/AdminDashboard.jsx  v3.0
 // ── Fixes: Members=0 (arrayFrom shape), compact() decimals, snapshotAt null, chatStats key
 // ── New:   Prayer RAG donut · Church Community · Upcoming Week · Team Performance
 //           Quick Actions bar · Recent Joiners · Ministry Milestones · trend arrows
@@ -468,7 +468,7 @@ function buildDashboard(results, days) {
 }
 
 /* ═══════════════════ PAGE ═══════════════════ */
-export default function AdminDashboard() {
+export default function AdminDashboard({ tenantId = "", tenantName = "", title = "Admin Dashboard" }) {
   const [user]    = useState(getCurrentUser);
   const roles     = useMemo(()=>normalizeRoles(user),[user]);
   const canAccess = Boolean(user&&(roles.some(r=>["admin","staff"].includes(r))||hasDashPage(user)));
@@ -477,15 +477,22 @@ export default function AdminDashboard() {
   const [rawResults, setRawResults] = useState([]);
   const [loading, setLoading]       = useState(false);
   const [error,   setError]         = useState("");
-<<<<<<< HEAD
-  const [chatSafetyScanStatus, setChatSafetyScanStatus] = useState("");
-=======
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
   const [dateRange, setDateRange]   = useState(30);
   const [countdown, setCountdown]   = useState(AUTO_REFRESH);
   const timerRef = useRef(null);
 
   const db = useMemo(()=>buildDashboard(rawResults,dateRange),[rawResults,dateRange]);
+  const tenantHeaders = useMemo(() => {
+    const id = String(tenantId || "").trim();
+    return id ? { "X-Tenant-Id": id } : null;
+  }, [tenantId]);
+  const scopedOptions = useCallback((options = {}) => ({
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      ...(tenantHeaders || {}),
+    },
+  }), [tenantHeaders]);
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -493,36 +500,36 @@ export default function AdminDashboard() {
     const month = monthIsoRange();
     try {
       setRawResults(await Promise.all([
-        safeGet("overview",      "/analytics/overview"),
-        safeGet("reports",       "/analytics/reports"),
-        safeGet("prayers",       "/analytics/prayers",            { params:{ windows:"7,15,30,60,90" } }),
-        safeGet("users",         "/users",                        { params:{ page:1,limit:500 } }),
-        safeGet("roles",         "/roles"),
-        safeGet("chats",         "/chats"),
-        safeGet("tasks",         "/tasks",                        { params:{ limit:500 } }),
-        safeGet("teams",         "/teams"),
-        safeGet("attendance",    "/attendance",                   { params:{ from, to:today } }),
-        safeGet("timesheets",    "/timesheets",                   { params:{ from, to:today } }),
-        safeGet("costPnl",       "/accounting/pnl",              { params:{ fromDate:month.from, toDate:month.to } }),
-        safeGet("pnl",           "/accounting/pnl",              { params:{ fromDate:from, toDate:today } }),
-        safeGet("accounts",      "/accounting/accounts"),
-        safeGet("balances",      "/accounting/balances"),
-        safeGet("balanceSheet",  "/accounting/balance-sheet",    { params:{ toDate:today } }),
-        safeGet("sermons",       "/sermons"),
-        safeGet("baptisms",      "/baptisms"),
-        safeGet("marriage",      "/marriage/admin/applications"),
-        safeGet("counselling",   "/counselling/admin/sessions"),
-        safeGet("payrollRuns",   "/payroll/runs"),
-        safeGet("prayerRequests","/prayerrequests",              { params:{ includeResponses:true,limit:500 } }),
-        safeGet("expenses",      "/expenses"),
-        safeGet("dailyRoutines", "/admin/daily-routines",        { params:{ date:today } }),
-        safeGet("chatSafety",    "/admin/chat-safety/summary"),
-        safeGet("chatAlerts",    "/admin/chat-safety/alerts",     { params:{ limit:8 } }),
+        safeGet("overview",      "/analytics/overview",          scopedOptions()),
+        safeGet("reports",       "/analytics/reports",           scopedOptions()),
+        safeGet("prayers",       "/analytics/prayers",           scopedOptions({ params:{ windows:"7,15,30,60,90" } })),
+        safeGet("users",         "/users",                       scopedOptions({ params:{ page:1,limit:500 } })),
+        safeGet("roles",         "/roles",                       scopedOptions()),
+        safeGet("chats",         "/chats",                       scopedOptions()),
+        safeGet("tasks",         "/tasks",                       scopedOptions({ params:{ limit:500 } })),
+        safeGet("teams",         "/teams",                       scopedOptions()),
+        safeGet("attendance",    "/attendance",                  scopedOptions({ params:{ from, to:today } })),
+        safeGet("timesheets",    "/timesheets",                  scopedOptions({ params:{ from, to:today } })),
+        safeGet("costPnl",       "/accounting/pnl",              scopedOptions({ params:{ fromDate:month.from, toDate:month.to } })),
+        safeGet("pnl",           "/accounting/pnl",              scopedOptions({ params:{ fromDate:from, toDate:today } })),
+        safeGet("accounts",      "/accounting/accounts",         scopedOptions()),
+        safeGet("balances",      "/accounting/balances",         scopedOptions()),
+        safeGet("balanceSheet",  "/accounting/balance-sheet",    scopedOptions({ params:{ toDate:today } })),
+        safeGet("sermons",       "/sermons",                     scopedOptions()),
+        safeGet("baptisms",      "/baptisms",                    scopedOptions()),
+        safeGet("marriage",      "/marriage/admin/applications", scopedOptions()),
+        safeGet("counselling",   "/counselling/admin/sessions",  scopedOptions()),
+        safeGet("payrollRuns",   "/payroll/runs",                scopedOptions()),
+        safeGet("prayerRequests","/prayerrequests",              scopedOptions({ params:{ includeResponses:true,limit:500 } })),
+        safeGet("expenses",      "/expenses",                    scopedOptions()),
+        safeGet("dailyRoutines", "/admin/daily-routines",        scopedOptions({ params:{ date:today } })),
+        safeGet("chatSafety",    "/admin/chat-safety/summary",   scopedOptions()),
+        safeGet("chatAlerts",    "/admin/chat-safety/alerts",    scopedOptions({ params:{ limit:8 } })),
       ]));
       setCountdown(AUTO_REFRESH);
     } catch(e) { setError(e?.message||"Unable to load analytics."); }
     finally    { setLoading(false); }
-  },[dateRange]);
+  },[dateRange, scopedOptions]);
 
   useEffect(()=>{ if(canAccess) load(); },[canAccess,load]);
 
@@ -535,61 +542,18 @@ export default function AdminDashboard() {
     return ()=>clearInterval(timerRef.current);
   },[canAccess,load]);
 
-  async function blockUser(uid,reason){ if(!uid||!confirm("Block this user?"))return; try{ await api.post(`/admin/daily-routines/users/${uid}/block`,{reason}); load(); }catch(e){setError(e.message);} }
-  async function unblockUser(uid)    { if(!uid||!confirm("Unblock?"))return;           try{ await api.post(`/admin/daily-routines/users/${uid}/unblock`);        load(); }catch(e){setError(e.message);} }
-<<<<<<< HEAD
-  async function scanChatSafety() {
-    try {
-      setLoading(true);
-      setError("");
-      setChatSafetyScanStatus("Full scan started. Checking eligible unscanned chat messages...");
-      const result = await api.post("/admin/chat-safety/scan-now");
-      if (result && typeof result === "object" && "ok" in result && !result.ok) {
-        throw new Error(result.error || result.statusText || "Chat safety scan failed.");
-      }
-      const scanResult = result?.data || result || {};
-      const scanned = num(scanResult?.scanned);
-      const pastorFollowupsSent = num(scanResult?.pastorFollowupsSent);
-      const eligibleBefore = scanResult?.eligibleBefore == null ? null : num(scanResult.eligibleBefore);
-      const eligibleAfter = scanResult?.eligibleAfter == null ? null : num(scanResult.eligibleAfter);
-      const detail = eligibleBefore == null
-        ? ""
-        : ` Eligible before: ${compact(eligibleBefore)}. Eligible after: ${compact(eligibleAfter || 0)}.`;
-      setChatSafetyScanStatus(
-        scanned > 0
-          ? `Full scan completed: ${compact(scanned)} message${scanned === 1 ? "" : "s"} scanned. Pastor follow-ups sent: ${pastorFollowupsSent}.${detail}`
-          : `Full scan completed: no messages were processed.${detail}${scanResult?.message ? ` ${scanResult.message}` : ""}`
-      );
-      await load();
-    } catch(e) {
-      const message = e?.message || "Chat safety scan failed.";
-      setError(message);
-      setChatSafetyScanStatus(`Full scan failed: ${message}`);
-    } finally {
-      setLoading(false);
-    }
-  }
-  async function resolveChatAlert(id) { if(!id)return; try{ await api.post(`/admin/chat-safety/alerts/${id}/resolve`); load(); }catch(e){setError(e.message);} }
+  async function blockUser(uid,reason){ if(!uid||!confirm("Block this user?"))return; try{ await api.post(`/admin/daily-routines/users/${uid}/block`,{reason}, scopedOptions()); load(); }catch(e){setError(e.message);} }
+  async function unblockUser(uid)    { if(!uid||!confirm("Unblock?"))return;           try{ await api.post(`/admin/daily-routines/users/${uid}/unblock`, {}, scopedOptions());        load(); }catch(e){setError(e.message);} }
+  async function scanChatSafety()     { try{ setLoading(true); await api.post("/admin/chat-safety/scan-now", {}, scopedOptions()); await load(); }catch(e){setError(e.message);} finally{setLoading(false);} }
+  async function resolveChatAlert(id) { if(!id)return; try{ await api.post(`/admin/chat-safety/alerts/${id}/resolve`, {}, scopedOptions()); load(); }catch(e){setError(e.message);} }
   async function blockChatSafetyUser(userId, reason) {
     if(!userId || !confirm("Block this user from logging in?")) return;
-    try{ await api.post(`/admin/chat-safety/users/${userId}/block`, { reason }); load(); }catch(e){setError(e.message);}
+    try{ await api.post(`/admin/chat-safety/users/${userId}/block`, { reason }, scopedOptions()); load(); }catch(e){setError(e.message);}
   }
   async function unblockChatSafetyUser(userId) {
     if(!userId || !confirm("Unblock this user and allow login again?")) return;
-    try{ await api.post(`/admin/chat-safety/users/${userId}/unblock`); load(); }catch(e){setError(e.message);}
+    try{ await api.post(`/admin/chat-safety/users/${userId}/unblock`, {}, scopedOptions()); load(); }catch(e){setError(e.message);}
   }
-=======
-  async function scanChatSafety()     { try{ setLoading(true); await api.post("/admin/chat-safety/scan-now"); await load(); }catch(e){setError(e.message);} finally{setLoading(false);} }
-  async function resolveChatAlert(id) { if(!id)return; try{ await api.post(`/admin/chat-safety/alerts/${id}/resolve`); load(); }catch(e){setError(e.message);} }
-  async function blockChatSafetyUser(userId, reason) {
-    if(!userId || !confirm("Block this user from logging in?")) return;
-    try{ await api.post(`/admin/chat-safety/users/${userId}/block`, { reason }); load(); }catch(e){setError(e.message);}
-  }
-  async function unblockChatSafetyUser(userId) {
-    if(!userId || !confirm("Unblock this user and allow login again?")) return;
-    try{ await api.post(`/admin/chat-safety/users/${userId}/unblock`); load(); }catch(e){setError(e.message);}
-  }
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 
   if(!canAccess) return (
     <main className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
@@ -607,15 +571,17 @@ export default function AdminDashboard() {
     <main className="min-h-screen bg-[#f5f7fa] text-slate-900">
 
       {/* ═════ STICKY HEADER ═════ */}
-      <header className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm">
+      <header className="mahima-standard-page-header sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm" data-mahima-explicit-header="true">
         <div className="px-5 lg:px-8 py-3 flex flex-wrap gap-3 items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow">
               <Sparkles className="w-4 h-4 text-white"/>
             </div>
             <div>
-              <h1 className="text-base font-extrabold tracking-tight">Admin Dashboard</h1>
-              <p className="text-[11px] text-slate-400">Snapshot: {db.snapshotAt}</p>
+              <h1 className="mahima-standard-page-title text-base font-extrabold tracking-tight" data-mahima-explicit-title="true">{title}</h1>
+              <p className="mahima-standard-page-subtitle text-[11px] text-slate-400">
+                {tenantName ? `${tenantName} · ` : ""}Snapshot: {db.snapshotAt}
+              </p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -669,10 +635,6 @@ export default function AdminDashboard() {
           summary={db.chatSafety}
           alerts={db.chatAlerts}
           loading={loading}
-<<<<<<< HEAD
-          scanStatus={chatSafetyScanStatus}
-=======
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
           onScan={scanChatSafety}
           onResolve={resolveChatAlert}
           onBlockUser={blockChatSafetyUser}
@@ -1217,11 +1179,7 @@ function CommsPanel({ db, navigate }) {
 }
 
 /* ═══════════════════ DAILY ROUTINES ═══════════════════ */
-<<<<<<< HEAD
-function ChatSafetyPanel({ summary, alerts, loading, scanStatus, onScan, onResolve, onBlockUser, onUnblockUser, navigate }) {
-=======
 function ChatSafetyPanel({ summary, alerts, loading, onScan, onResolve, onBlockUser, onUnblockUser, navigate }) {
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
   const rows = arrayFrom(alerts);
   const open = num(summary?.open);
   const special = num(summary?.special);
@@ -1271,17 +1229,6 @@ function ChatSafetyPanel({ summary, alerts, loading, onScan, onResolve, onBlockU
         </div>
       )}
 
-<<<<<<< HEAD
-      {scanStatus && (
-        <div className="px-5 pt-3">
-          <div className="rounded-xl border border-sky-100 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800">
-            {scanStatus}
-          </div>
-        </div>
-      )}
-
-=======
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
       <div className="p-5">
         {!rows.length ? (
           <EmptyState text="No unresolved chat safety alerts."/>

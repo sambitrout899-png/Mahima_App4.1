@@ -1,16 +1,14 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-<<<<<<< HEAD
-using System.Text;
-=======
 using System.Security.Claims;
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
+using System.Text;
 using System.Threading.Tasks;
 using Mahima.Api.v3.clean.Data;
 using Mahima.Api.v3.clean.Models;
+using Mahima.Api.v3.clean.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -67,11 +65,13 @@ public class AccountingController : ControllerBase
     };
 
     private readonly MahimaDbContext _db;
+    private readonly ITenantPrintTemplateService _printTemplates;
     private static readonly Guid RootTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
 
-    public AccountingController(MahimaDbContext db)
+    public AccountingController(MahimaDbContext db, ITenantPrintTemplateService printTemplates)
     {
         _db = db;
+        _printTemplates = printTemplates;
     }
 
     private Guid GetCurrentTenantId() =>
@@ -677,6 +677,8 @@ public class AccountingController : ControllerBase
     public async Task<IActionResult> GetPnLPdf([FromQuery] DateTime? fromDate, [FromQuery] DateTime? toDate)
     {
         var report = await BuildPnlReportAsync(NormalizeQueryDate(fromDate), NormalizeQueryDate(toDate));
+        var template = await _printTemplates.GetAsync(GetCurrentTenantId(), HttpContext.RequestAborted);
+        var logo = await _printTemplates.LoadLogoAsync(template, HttpContext.RequestAborted);
 
         var pdf = Document.Create(container =>
         {
@@ -686,7 +688,13 @@ public class AccountingController : ControllerBase
 
                 page.Header().Column(col =>
                 {
-                    col.Item().Text("Mahima Ministries").FontSize(20).Bold().AlignCenter();
+                    if (logo is { Length: > 0 })
+                        col.Item().AlignCenter().MaxWidth(100).MaxHeight(55).Image(logo).FitArea();
+                    col.Item().Text(template.OrganizationName).FontSize(20).Bold().FontColor(template.PrimaryColor).AlignCenter();
+                    if (!string.IsNullOrWhiteSpace(template.HeaderText))
+                        col.Item().Text(template.HeaderText).FontSize(9).AlignCenter();
+                    if (template.ShowAddress && !string.IsNullOrWhiteSpace(template.Address))
+                        col.Item().Text(template.Address).FontSize(8).AlignCenter();
                     col.Item().Text("Profit and Loss Statement").FontSize(14).AlignCenter();
                     col.Item().Text($"Period: {FormatDate(report.FromDate)} to {FormatDate(report.ToDate)}")
                         .FontSize(9)
@@ -732,7 +740,18 @@ public class AccountingController : ControllerBase
                     });
                 });
 
-                page.Footer().AlignCenter().Text($"Generated on {DateTime.Now:dd-MM-yyyy HH:mm}");
+                page.Footer().Row(row =>
+                {
+                    row.RelativeItem().Text(template.FooterText ?? $"Generated on {DateTime.Now:dd-MM-yyyy HH:mm}").FontSize(8);
+                    if (template.ShowPageNumbers)
+                        row.ConstantItem(90).AlignRight().Text(text =>
+                        {
+                            text.Span("Page ");
+                            text.CurrentPageNumber();
+                            text.Span(" of ");
+                            text.TotalPages();
+                        });
+                });
             });
         }).GeneratePdf();
 

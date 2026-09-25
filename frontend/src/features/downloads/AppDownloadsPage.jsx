@@ -1,4 +1,5 @@
 ﻿import React, { useEffect, useMemo, useState } from "react";
+import { useParams } from "react-router-dom";
 import {
   AlertCircle,
   Apple,
@@ -22,6 +23,7 @@ import {
 import { API_BASE } from "../../api";
 import { getToken } from "../../utils/auth";
 import TenantLogo from "../../components/TenantLogo";
+import { activeTenantSlug } from "../../utils/tenantNavigation";
 
 function envValue(key, fallback) {
   const value = import.meta.env[key];
@@ -189,7 +191,7 @@ function PlatformCard({ platform, preferred }) {
   );
 }
 
-function AdminReleaseUploader({ releaseInfo, releaseLoading, releaseError, onRefresh, onUploaded }) {
+function AdminReleaseUploader({ releaseInfo, releaseLoading, releaseError, onRefresh, onUploaded, tenantSlug }) {
   const android = releaseInfo?.android || {};
   const [file, setFile] = useState(null);
   const [version, setVersion] = useState(android.latestVersion || releaseInfo?.latestVersion || "");
@@ -228,7 +230,10 @@ function AdminReleaseUploader({ releaseInfo, releaseLoading, releaseError, onRef
     form.append("forceUpgrade", forceUpgrade ? "true" : "false");
 
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${API_BASE}/app-releases/android`);
+    const uploadPath = tenantSlug
+      ? `${API_BASE}/app-releases/${encodeURIComponent(tenantSlug)}/android`
+      : `${API_BASE}/app-releases/android`;
+    xhr.open("POST", uploadPath);
     const token = getToken();
     if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
     xhr.setRequestHeader("Accept", "application/json");
@@ -314,19 +319,26 @@ function AdminReleaseUploader({ releaseInfo, releaseLoading, releaseError, onRef
 }
 
 export default function AppDownloadsPage({ publicMode = false }) {
+  const { tenantSlug: routeTenantSlug } = useParams();
   const detected = useMemo(() => detectPlatform(), []);
   const webVersion = envValue("VITE_APP_VERSION", "0.1.0");
   const [releaseInfo, setReleaseInfo] = useState(null);
   const [releaseLoading, setReleaseLoading] = useState(false);
   const [releaseError, setReleaseError] = useState("");
+  const [tenantInfo, setTenantInfo] = useState(null);
   const user = useMemo(() => getCurrentUserSync(), []);
+  const tenantSlug = useMemo(() => (
+    activeTenantSlug(routeTenantSlug) ||
+    String(user?.tenantSlug || user?.TenantSlug || user?.tenant_slug || "").trim()
+  ), [routeTenantSlug, user]);
   const showAdminReleaseTools = !publicMode && canManageReleases(user);
+  const releasesPath = tenantSlug ? `/app-releases/${encodeURIComponent(tenantSlug)}` : "/app-releases";
 
   async function loadReleaseInfo() {
     setReleaseLoading(true);
     setReleaseError("");
     try {
-      const res = await fetch(`${API_BASE}/app-releases/latest?t=${Date.now()}`, { headers: { Accept: "application/json" }, cache: "no-store" });
+      const res = await fetch(`${API_BASE}${releasesPath}/latest?t=${Date.now()}`, { headers: { Accept: "application/json" }, cache: "no-store" });
       if (!res.ok) throw new Error(await res.text());
       setReleaseInfo(await res.json());
     } catch (err) {
@@ -336,13 +348,27 @@ export default function AppDownloadsPage({ publicMode = false }) {
     }
   }
 
-  useEffect(() => { loadReleaseInfo(); }, []);
+  useEffect(() => { loadReleaseInfo(); }, [releasesPath]);
+
+  useEffect(() => {
+    if (!tenantSlug) { setTenantInfo(null); return; }
+    let cancelled = false;
+    fetch(`${API_BASE}/public/tenants`, { headers: { Accept: "application/json" }, cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        const match = (data.tenants || []).find((t) => t.slug === tenantSlug);
+        if (match) setTenantInfo(match);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [tenantSlug]);
 
   const platforms = useMemo(() => {
     const android = releaseInfo?.android || {};
     const ios = releaseInfo?.ios || {};
     const androidStaticUrl = absoluteUrl(android.apkUrl || releaseInfo?.androidApkUrl || envValue("VITE_ANDROID_APK_URL", "/downloads/mahima-app.apk"));
-    const androidDownloadUrl = absoluteUrl(android.downloadUrl || releaseInfo?.androidDownloadUrl || apiAbsoluteUrl("/app-releases/android/download"));
+    const androidDownloadUrl = absoluteUrl(android.downloadUrl || releaseInfo?.androidDownloadUrl || apiAbsoluteUrl(`${releasesPath}/android/download`));
     const iosUrl = absoluteUrl(ios.url || releaseInfo?.iosUrl || envValue("VITE_IOS_APP_URL", "/downloads/mahima-ios.ipa"));
 
     return [
@@ -374,7 +400,7 @@ export default function AppDownloadsPage({ publicMode = false }) {
         sizeLabel: "Store managed",
       },
     ];
-  }, [releaseInfo, webVersion]);
+  }, [releaseInfo, webVersion, releasesPath]);
 
   const preferredPlatform = platforms.find((p) => p.key === detected) || platforms[0];
   const otherPlatforms = platforms.filter((p) => p.key !== preferredPlatform.key);
@@ -395,18 +421,19 @@ export default function AppDownloadsPage({ publicMode = false }) {
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-black uppercase tracking-wide text-emerald-50">
                 <Sparkles className="h-4 w-4 text-amber-200" />
-                Mahima mobile app
+                {tenantInfo ? `${tenantInfo.name} mobile app` : "Mahima mobile app"}
               </div>
               <div className="mt-5 flex items-center gap-4">
-<<<<<<< HEAD
-                <div className="grid h-16 w-16 shrink-0 place-items-center rounded-lg bg-white p-2 shadow-lg">
-                  <img src={mahimaLogo} alt="Mahima Ministry" className="h-full w-full object-contain" />
-                </div>
-=======
-                <TenantLogo name="Mobile App" className="h-16 w-16 rounded-lg shadow-lg" fallbackClassName="bg-white text-emerald-800" />
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
+                <TenantLogo
+                  src={tenantInfo?.logoUrl || tenantInfo?.LogoUrl}
+                  name={tenantInfo?.name || "Mobile App"}
+                  className="h-16 w-16 rounded-lg shadow-lg"
+                  fallbackClassName="bg-white text-emerald-800"
+                />
                 <div>
-                  <h1 className="text-3xl font-black leading-tight sm:text-4xl">Download Mahima App</h1>
+                  <h1 className="text-3xl font-black leading-tight sm:text-4xl">
+                    {tenantInfo ? `Download the ${tenantInfo.name} App` : "Download Mahima App"}
+                  </h1>
                   <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-emerald-50 sm:text-base">
                     Install the latest ministry app for chat, prayer, sermons, notifications, and daily church operations.
                   </p>
@@ -456,7 +483,7 @@ export default function AppDownloadsPage({ publicMode = false }) {
           <div className="grid gap-6 p-5 sm:p-8 lg:grid-cols-[1.35fr_0.65fr]">
             <div className="space-y-6">
               {showAdminReleaseTools && (
-                <AdminReleaseUploader releaseInfo={releaseInfo} releaseLoading={releaseLoading} releaseError={releaseError} onRefresh={loadReleaseInfo} onUploaded={setReleaseInfo} />
+                <AdminReleaseUploader releaseInfo={releaseInfo} releaseLoading={releaseLoading} releaseError={releaseError} onRefresh={loadReleaseInfo} onUploaded={setReleaseInfo} tenantSlug={tenantSlug} />
               )}
               <PlatformCard platform={preferredPlatform} preferred />
               {otherPlatforms.map((platform) => <PlatformCard key={platform.key} platform={platform} preferred={false} />)}

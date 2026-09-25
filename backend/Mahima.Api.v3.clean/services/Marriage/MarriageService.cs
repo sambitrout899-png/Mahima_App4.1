@@ -1,4 +1,4 @@
-using Mahima.Api.v3.clean.Data;
+﻿using Mahima.Api.v3.clean.Data;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -219,14 +219,9 @@ namespace Mahima.Api.v3.clean.services.Marriage
             Guid id,
             CancellationToken ct = default)
         {
-<<<<<<< HEAD
-            var entity = await _db.MarriageApplications
-                .FirstOrDefaultAsync(m => m.Id == id, ct);
-=======
             var tenantId = await GetCurrentTenantIdAsync();
             var entity = await _db.MarriageApplications
                 .FirstOrDefaultAsync(m => m.Id == id && m.TenantId == tenantId, ct);
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 
             if (entity == null)
                 throw new InvalidOperationException($"Application {id} not found.");

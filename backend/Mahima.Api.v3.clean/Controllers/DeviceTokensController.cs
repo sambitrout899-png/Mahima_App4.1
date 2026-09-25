@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
@@ -24,27 +24,17 @@ namespace Mahima.Api.v3.clean.Controllers
     {
         private const string KeyPrefix = "DeviceToken:";
         private readonly MahimaDbContext _db;
-<<<<<<< HEAD
-        private readonly IMobilePushNotificationService? _mobilePush;
-        private readonly IConfiguration _configuration;
-
-        public DeviceTokensController(
-            MahimaDbContext db,
-            IEnumerable<IMobilePushNotificationService> mobilePushServices,
-            IConfiguration configuration)
-        {
-            _db = db;
-            _mobilePush = mobilePushServices?.FirstOrDefault();
-            _configuration = configuration;
-=======
         private readonly ITenantContextService _tenantContext;
+        private readonly IConfiguration _configuration;
+        private readonly IMobilePushNotificationService? _mobilePush;
         private static readonly Guid RootTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
 
-        public DeviceTokensController(MahimaDbContext db, ITenantContextService tenantContext)
+        public DeviceTokensController(MahimaDbContext db, ITenantContextService tenantContext, IConfiguration configuration, IEnumerable<IMobilePushNotificationService> mobilePushServices)
         {
             _db = db;
             _tenantContext = tenantContext;
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
+            _configuration = configuration;
+            _mobilePush = mobilePushServices?.FirstOrDefault();
         }
 
         public class RegisterDeviceTokenDto

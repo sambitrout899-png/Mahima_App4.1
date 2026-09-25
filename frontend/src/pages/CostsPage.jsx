@@ -259,7 +259,7 @@ const ConfirmModal = ({ open, title, body, onConfirm, onCancel, danger }) => {
 /* ======================================================================== */
 
 export default function CostsPage() {
-  // Pull individual toast helpers � each is a stable useCallback inside
+  // Pull individual toast helpers; each is a stable useCallback inside.
   // useToasts, so depending on them in our own useCallbacks/useEffects
   // does NOT cause a render loop.
   const { toasts, success: toastSuccess, error: toastError, info: toastInfo, dismiss: toastDismiss } = useToasts();
@@ -379,7 +379,7 @@ export default function CostsPage() {
   }, [fetchAccountsAndBalances, fetchPnlTrend]);
 
   // Build query params for date filters. We always emit UTC ISO strings
-  // ending in "Z" � bare strings like "2026-04-01T00:00:00" arrive at the
+  // ending in "Z"; bare strings like "2026-04-01T00:00:00" arrive at the
   // backend as DateTime with Kind=Unspecified, which Npgsql refuses to
   // write to a `timestamp with time zone` column.
   // dayjs parses "YYYY-MM-DD" as local midnight; startOf/endOf ensures
@@ -496,13 +496,7 @@ export default function CostsPage() {
       });
       toastSuccess("Expense recorded.");
       setExpenseModal(false);
-<<<<<<< HEAD
-      await fetchAccountsAndBalances();
-      if (view === "dashboard" || view === "reports") await loadPnl();
-      fetchPnlTrend();
-=======
       await refreshAfterJournalChange();
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
     } catch (e) {
       toastError(errMsg(e, "Save failed."));
     }
@@ -521,13 +515,7 @@ export default function CostsPage() {
       });
       toastSuccess("Income recorded.");
       setIncomeModal(false);
-<<<<<<< HEAD
-      await fetchAccountsAndBalances();
-      if (view === "dashboard" || view === "reports") await loadPnl();
-      fetchPnlTrend();
-=======
       await refreshAfterJournalChange();
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
     } catch (e) {
       toastError(errMsg(e, "Save failed."));
     }
@@ -564,14 +552,7 @@ export default function CostsPage() {
       });
       toastSuccess("Journal entry posted.");
       setManualJournalModal(false);
-<<<<<<< HEAD
-      await fetchAccountsAndBalances();
-      if (view === "dashboard" || view === "reports") await loadPnl();
-      fetchPnlTrend();
-      if (selectedAccount) await loadLedger(selectedAccount);
-=======
       await refreshAfterJournalChange();
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
     } catch (e) {
       toastError(errMsg(e, "Journal entry failed."));
     }
@@ -746,7 +727,7 @@ export default function CostsPage() {
         return t === "EXPENSE" && safeNum(b.balance) > 0;
       })
       .map((b) => ({
-        name: b.accountName || accounts.find((a) => a.id === b.accountId)?.name || "�",
+        name: b.accountName || accounts.find((a) => a.id === b.accountId)?.name || "—",
         value: safeNum(b.balance),
       }))
       .sort((x, y) => y.value - x.value)
@@ -1359,7 +1340,7 @@ function DashboardView({ totalsByType, cashAndBank, balances, accounts, periodPn
       {/* 6-month trend */}
       <div className="lg:col-span-2 panel p-4">
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-sm font-semibold text-slate-900">Income vs Expense � last 6 months</h3>
+          <h3 className="text-sm font-semibold text-slate-900">Income vs Expense — last 6 months</h3>
         </div>
         <div className="h-64">
           {pnlSeries.length === 0 ? (
@@ -1452,7 +1433,7 @@ function DashboardView({ totalsByType, cashAndBank, balances, accounts, periodPn
         {loading ? (
           <SkeletonBlock />
         ) : balances.length === 0 ? (
-          <EmptyState message="No accounts yet � add one to get started." />
+          <EmptyState message="No accounts yet — add one to get started." />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
             {balances.map((b) => {
@@ -1590,7 +1571,7 @@ function TransactionsView({
               <input
                 value={searchQuery}
                 onChange={(e) => onSearchChange(e.target.value)}
-                placeholder="Search�"
+                placeholder="Search…"
                 className="input-sm pl-7 w-44"
               />
             </div>
@@ -1613,28 +1594,6 @@ function TransactionsView({
                   <th className="px-3 py-2 text-right">Debit</th>
                   <th className="px-3 py-2 text-right">Credit</th>
                   <th className="px-3 py-2 text-right">Balance</th>
-<<<<<<< HEAD
-                </tr>
-              </thead>
-              <tbody>
-                {ledger.map((l, i) => (
-                  <tr key={i} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50">
-                    <td className="px-3 py-2 whitespace-nowrap text-slate-600">
-                      {l.date ? dayjs(l.date).format("DD MMM YYYY") : "�"}
-                    </td>
-                    <td className="px-3 py-2 text-slate-800">{l.description || "�"}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">
-                      {safeNum(l.debit) ? formatINR(l.debit) : "�"}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">
-                      {safeNum(l.credit) ? formatINR(l.credit) : "�"}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-900 whitespace-nowrap">
-                      {formatINR(l.balance ?? l.Balance)}
-                    </td>
-                  </tr>
-                ))}
-=======
                   <th className="px-3 py-2 text-right">Actions</th>
                 </tr>
               </thead>
@@ -1644,14 +1603,14 @@ function TransactionsView({
                   return (
                     <tr key={l.id || l.Id || `${entryId || "entry"}-${i}`} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50">
                       <td className="px-3 py-2 whitespace-nowrap text-slate-600">
-                        {l.date ? dayjs(l.date).format("DD MMM YYYY") : "�"}
+                        {l.date ? dayjs(l.date).format("DD MMM YYYY") : "—"}
                       </td>
-                      <td className="px-3 py-2 text-slate-800">{l.description || "�"}</td>
+                      <td className="px-3 py-2 text-slate-800">{l.description || "—"}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-slate-700">
-                        {safeNum(l.debit) ? formatINR(l.debit) : "�"}
+                        {safeNum(l.debit) ? formatINR(l.debit) : "—"}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums text-slate-700">
-                        {safeNum(l.credit) ? formatINR(l.credit) : "�"}
+                        {safeNum(l.credit) ? formatINR(l.credit) : "—"}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-900 whitespace-nowrap">
                         {formatINR(l.balance ?? l.Balance)}
@@ -1681,7 +1640,6 @@ function TransactionsView({
                     </tr>
                   );
                 })}
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
               </tbody>
               <tfoot>
                 <tr className="bg-slate-50 font-semibold">
@@ -1689,10 +1647,7 @@ function TransactionsView({
                   <td className="px-3 py-2 text-right tabular-nums">{formatINR(totals.debit)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{formatINR(totals.credit)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-slate-900">{formatINR(endingBalance)}</td>
-<<<<<<< HEAD
-=======
                   <td className="px-3 py-2" />
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
                 </tr>
               </tfoot>
             </table>
@@ -1876,7 +1831,7 @@ function ReportsView({ pnl, balances, accounts, totalsByType, pnlSeries, loading
             : "bg-amber-50 text-amber-800 border border-amber-200"
         }`}>
           {Math.abs(totalAssets - (totalLiabilities + totalEquity)) < 0.01
-            ? "Balanced � Assets equal Liabilities + Equity."
+            ? "Balanced — Assets equal Liabilities + Equity."
             : `Out of balance by ${formatINR(totalAssets - (totalLiabilities + totalEquity))}`}
         </div>
       </div>
@@ -2214,7 +2169,7 @@ function ReportRow({ label, value, positive, negative, bold, tone }) {
 }
 
 /* ======================================================================== */
-/*  Modals � controlled forms                                                */
+/*  Modals — controlled forms                                                */
 /* ======================================================================== */
 
 function JournalEntryModal({ mode, accounts, onCancel, onSave }) {
@@ -2285,7 +2240,7 @@ function JournalEntryModal({ mode, accounts, onCancel, onSave }) {
         <>
           <Field label="Expense category">
             <select value={form.debitAccountId} onChange={(e) => setForm({ ...form, debitAccountId: e.target.value })} className="input">
-              <option value="">Choose category�</option>
+              <option value="">Choose category…</option>
               {expenseAccounts.map((a) => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
@@ -2293,7 +2248,7 @@ function JournalEntryModal({ mode, accounts, onCancel, onSave }) {
           </Field>
           <Field label="Paid from">
             <select value={form.creditAccountId} onChange={(e) => setForm({ ...form, creditAccountId: e.target.value })} className="input">
-              <option value="">Choose account�</option>
+              <option value="">Choose account…</option>
               {cashLikeAccounts.map((a) => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
@@ -2304,7 +2259,7 @@ function JournalEntryModal({ mode, accounts, onCancel, onSave }) {
         <>
           <Field label="Income source">
             <select value={form.creditAccountId} onChange={(e) => setForm({ ...form, creditAccountId: e.target.value })} className="input">
-              <option value="">Choose source�</option>
+              <option value="">Choose source…</option>
               {incomeAccounts.map((a) => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
@@ -2312,7 +2267,7 @@ function JournalEntryModal({ mode, accounts, onCancel, onSave }) {
           </Field>
           <Field label="Received in">
             <select value={form.debitAccountId} onChange={(e) => setForm({ ...form, debitAccountId: e.target.value })} className="input">
-              <option value="">Choose account�</option>
+              <option value="">Choose account…</option>
               {cashLikeAccounts.map((a) => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
@@ -2490,13 +2445,13 @@ function TransferModal({ accounts, onCancel, onSave }) {
       <div className="grid grid-cols-2 gap-2">
         <Field label="From">
           <select value={form.fromAccountId} onChange={(e) => setForm({ ...form, fromAccountId: e.target.value })} className="input">
-            <option value="">Choose�</option>
+            <option value="">Choose…</option>
             {cashLike.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         </Field>
         <Field label="To">
           <select value={form.toAccountId} onChange={(e) => setForm({ ...form, toAccountId: e.target.value })} className="input">
-            <option value="">Choose�</option>
+            <option value="">Choose…</option>
             {cashLike.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         </Field>
@@ -2555,7 +2510,7 @@ function OpeningBalanceModal({ row, onCancel, onSave }) {
   };
 
   return (
-    <ModalShell title={`Opening balance � ${row.accountName}`} onCancel={onCancel} onSubmit={handleSubmit} saving={saving} tone="emerald">
+    <ModalShell title={`Opening balance — ${row.accountName}`} onCancel={onCancel} onSubmit={handleSubmit} saving={saving} tone="emerald">
       <Field label={`Amount (${RUPEE})`}>
         <input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="input" autoFocus required />
       </Field>

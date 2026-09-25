@@ -1,7 +1,10 @@
-// src/api.js
+﻿// src/api.js
 
-import { apiFetchJson } from "./utils/fetch-auth-shim";
+import { apiFetchBlob, apiFetchJson } from "./utils/fetch-auth-shim";
 import { activePositionHeaderValue } from "./utils/positionContext";
+import { mobileClientHeaders } from "./utils/mobileAccessPolicy";
+import { defaultActionMessage, notifyError, notifySuccess } from "./utils/notifications";
+import { writeSharedAuthToken, clearSharedAuthToken } from "./utils/sharedAuthCookie";
 
 /* ---------------- API BASE ---------------- */
 function buildApiBase() {
@@ -32,7 +35,7 @@ function buildApiBase() {
       if (isNative) {
         base =
           import.meta.env.VITE_MOBILE_API_BASE ||
-          "https://mahimaministries.in/api";
+          "https://beta.mahimaministries.in/api";
       }
     }
   } catch {}
@@ -111,6 +114,7 @@ function appendParams(url, params) {
 function headersWithDefaults(headers) {
   return {
     ...(defaults.headers.common || {}),
+    ...mobileClientHeaders(),
     ...(headers || {}),
   };
 }
@@ -125,14 +129,11 @@ function bodyFor(data, headers) {
   return typeof data === "string" ? data : JSON.stringify(data);
 }
 
-function request(method, url, data, options = {}) {
-  const { params, headers: optionHeaders, ...rest } = options || {};
+async function request(method, url, data, options = {}) {
+  const { params, headers: optionHeaders, responseType, notify: shouldNotify = true, successMessage, ...rest } = options || {};
   const headers = headersWithDefaults(optionHeaders);
-<<<<<<< HEAD
-=======
   const tenantSlug = activeTenantSlug();
   if (tenantSlug && !headers["X-Tenant-Slug"] && !headers["X-Tenant-Id"]) headers["X-Tenant-Slug"] = tenantSlug;
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
   const activePositionId = activePositionHeaderValue();
   if (activePositionId && !headers["X-Mahima-Position-Id"]) headers["X-Mahima-Position-Id"] = activePositionId;
   const init = {
@@ -145,7 +146,25 @@ function request(method, url, data, options = {}) {
     init.body = bodyFor(data, headers);
   }
 
-  return apiFetchJson(appendParams(url, params), init);
+  const finalUrl = appendParams(url, params);
+  if (String(responseType || "").toLowerCase() === "blob") {
+    const download = await apiFetchBlob(finalUrl, init);
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      data: download.blob,
+      fileName: download.fileName,
+      contentType: download.contentType,
+    };
+  }
+  const response = await apiFetchJson(finalUrl, init);
+  const isMutation = !["GET", "HEAD", "OPTIONS"].includes(String(method).toUpperCase());
+  if (shouldNotify && isMutation) {
+    if (response?.ok) notifySuccess(successMessage || defaultActionMessage(method, url));
+    else notifyError(response, "The action could not be completed.");
+  }
+  return response;
 }
 
 const api = {
@@ -167,12 +186,14 @@ export function setAuthToken(token) {
       localStorage.setItem("mahima_token", cleanToken);
       localStorage.setItem("authToken", cleanToken);
       localStorage.setItem("token", cleanToken);
+      writeSharedAuthToken(cleanToken);
       defaults.headers.common.Authorization = `Bearer ${cleanToken}`;
     } else {
       localStorage.removeItem("mahima_token");
       localStorage.removeItem("authToken");
       localStorage.removeItem("auth_token");
       localStorage.removeItem("token");
+      clearSharedAuthToken();
       delete defaults.headers.common.Authorization;
     }
 

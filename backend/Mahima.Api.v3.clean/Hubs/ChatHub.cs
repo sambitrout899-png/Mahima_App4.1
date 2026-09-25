@@ -21,28 +21,21 @@ namespace Mahima.Api.v3.clean.Hubs
         private readonly ILogger<ChatHub> _logger;
         private readonly IChatService _chatService;
         private readonly IMobilePushNotificationService? _mobilePush;
-<<<<<<< HEAD
         private readonly IPastorBotService _pastorBot;
-
-        public ChatHub(ILogger<ChatHub> logger, IChatService chatService, IEnumerable<IMobilePushNotificationService> mobilePushServices, IPastorBotService pastorBot)
-=======
         private readonly ITenantContextService _tenantContext;
         private readonly ILicensingService _licensing;
 
-        public ChatHub(ILogger<ChatHub> logger, IChatService chatService, IEnumerable<IMobilePushNotificationService> mobilePushServices, ITenantContextService tenantContext, ILicensingService licensing)
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
+        public ChatHub(ILogger<ChatHub> logger, IChatService chatService, IEnumerable<IMobilePushNotificationService> mobilePushServices, IPastorBotService pastorBot, ITenantContextService tenantContext, ILicensingService licensing)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _chatService = chatService ?? throw new ArgumentNullException(nameof(chatService));
             _mobilePush = mobilePushServices?.FirstOrDefault();
-<<<<<<< HEAD
             _pastorBot = pastorBot ?? throw new ArgumentNullException(nameof(pastorBot));
-=======
             _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
             _licensing = licensing ?? throw new ArgumentNullException(nameof(licensing));
         }
 
-        private async Task RequireChatModuleAsync()
+        private async Task<Guid> RequireChatModuleAsync()
         {
             var tenant = await _tenantContext.GetCurrentTenantAsync();
             if (tenant == null)
@@ -50,12 +43,18 @@ namespace Mahima.Api.v3.clean.Hubs
 
             if (!await _licensing.HasModuleAsync(tenant.Id, LicensingService.ChatModule))
                 throw new HubException("The Jai Masih Chat module is not active for this church.");
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
+
+            return tenant.Id;
         }
+
+        // Group name every connection for a tenant joins on connect, so tenant-wide broadcasts
+        // (e.g. prayer wall events) reach only that tenant instead of Clients.All.
+        public static string TenantGroupName(Guid tenantId) => $"tenant:{tenantId}";
 
         public override async Task OnConnectedAsync()
         {
-            await RequireChatModuleAsync();
+            var tenantId = await RequireChatModuleAsync();
+            await Groups.AddToGroupAsync(Context.ConnectionId, TenantGroupName(tenantId));
 
             var userId = GetUserId();
             if (userId != Guid.Empty)
@@ -67,7 +66,7 @@ namespace Mahima.Api.v3.clean.Hubs
                 await Clients.Caller.SendAsync("PresenceSnapshot", OnlineUserIds());
                 if (wasOffline)
                 {
-                    await Clients.All.SendAsync("UserPresence", new { userId, isOnline = true, at = DateTime.UtcNow });
+                    await Clients.Group(TenantGroupName(tenantId)).SendAsync("UserPresence", new { userId, isOnline = true, at = DateTime.UtcNow });
                 }
             }
 

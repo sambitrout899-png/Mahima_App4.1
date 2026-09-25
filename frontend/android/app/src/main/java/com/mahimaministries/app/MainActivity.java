@@ -2,10 +2,7 @@ package com.mahimaministries.app;
 
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
-<<<<<<< HEAD
 import android.content.Intent;
-=======
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
@@ -16,7 +13,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         registerPlugin(MahimaPushTokenPlugin.class);
-<<<<<<< HEAD
+        registerPlugin(MahimaTrayNotificationPlugin.class);
         super.onCreate(savedInstanceState);
         createNotificationChannels();
         MahimaCallIntentStore.saveFromIntent(this, getIntent());
@@ -29,11 +26,6 @@ public class MainActivity extends BridgeActivity {
         setIntent(intent);
         MahimaCallIntentStore.saveFromIntent(this, intent);
         MahimaShareIntentStore.saveFromIntent(this, intent);
-=======
-        registerPlugin(MahimaTrayNotificationPlugin.class);
-        super.onCreate(savedInstanceState);
-        createNotificationChannels();
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
     }
 
     private void createNotificationChannels() {
@@ -55,7 +47,6 @@ public class MainActivity extends BridgeActivity {
         chatChannel.setShowBadge(true);
         nm.createNotificationChannel(chatChannel);
 
-<<<<<<< HEAD
         NotificationChannel callChannel = new NotificationChannel(
             "jai-masih-calls",
             "Jai Masih - Calls",
@@ -68,9 +59,6 @@ public class MainActivity extends BridgeActivity {
         callChannel.setLightColor(Color.parseColor("#047857"));
         callChannel.setShowBadge(true);
         nm.createNotificationChannel(callChannel);
-
-=======
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
         NotificationChannel generalChannel = new NotificationChannel(
             "mahima-general",
             "Mahima Ministry - General",

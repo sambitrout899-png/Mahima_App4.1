@@ -28,13 +28,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
 
 // Npgsql 6.0+ enforces strict DateTime Kind matching.
-<<<<<<< HEAD
-// This switch restores the pre-6.0 behaviour so that both
-// 'timestamp without time zone' and 'timestamp with time zone' columns
-// accept DateTime values regardless of Kind, matching how the app was built.
-=======
 // This switch preserves the app's existing timestamp behavior.
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 
 var builder = WebApplication.CreateBuilder(args);
@@ -154,41 +148,55 @@ builder.Services.AddCors(options =>
 // SERVICES
 // -------------------------------------------------------
 builder.Services.AddSignalR();
+builder.Services.AddMemoryCache();
 
 builder.Services.AddSingleton<IUserIdProvider, NameIdentifierUserIdProvider>();
 
 builder.Services.AddSingleton<JwtTokenService>();
 builder.Services.AddScoped<ITenantContextService, TenantContextService>();
+builder.Services.AddScoped<TenantStorageService>();
+builder.Services.AddHostedService<TenantStorageMonitor>();
 builder.Services.AddScoped<ILicensingService, LicensingService>();
 builder.Services.AddScoped<IChatService, ChatService>();
 builder.Services.AddSingleton<IEmailService, SmtpEmailService>();
+builder.Services.AddSingleton<IMarketingEmailService, MarketingSmtpEmailService>();
 builder.Services.AddScoped<IMobilePushNotificationService, MobilePushNotificationService>();
 builder.Services.AddScoped<IBaptismCertificateService, BaptismCertificateService>();
+builder.Services.AddScoped<ITenantPrintTemplateService, TenantPrintTemplateService>();
 builder.Services.AddScoped<IMarriageService, MarriageService>();
 builder.Services.AddScoped<ICounsellingService, CounsellingService>();
 builder.Services.AddScoped<AccountingService>();
+builder.Services.AddScoped<AppReleasePublishingService>();
+builder.Services.AddScoped<INotificationDelivery, NotificationDelivery>();
+builder.Services.AddScoped<INotificationDispatcher, NotificationDispatcher>();
 builder.Services.AddSwaggerGen();
 builder.Services.AddHttpClient("PastorBot");
-<<<<<<< HEAD
-// AI Counseller — provider-agnostic LLM layer. The concrete provider is selected by
-// the PastorBot:* configuration block and can be a self-hosted model (Ollama,
-// vLLM) or any OpenAI-compatible endpoint — no OpenAI dependency required.
-=======
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
+builder.Services.AddHttpClient("MarketingDiscovery", client =>
+{
+    // Multi-region Responses API web-search runs can legitimately take several
+    // minutes. Keep this isolated so normal chat requests retain their shorter
+    // latency/timeout behaviour.
+    client.Timeout = TimeSpan.FromMinutes(8);
+});
 builder.Services.AddSingleton<Mahima.Api.v3.clean.Services.Ai.IScriptureService,
                                Mahima.Api.v3.clean.Services.Ai.ScriptureService>();
 builder.Services.AddScoped<Mahima.Api.v3.clean.Services.Ai.ILlmProvider,
                             Mahima.Api.v3.clean.Services.Ai.OpenAiCompatibleLlmProvider>();
 builder.Services.AddScoped<IPastorBotService, PastorBotService>();
-<<<<<<< HEAD
-builder.Services.AddHostedService<MinistryChatAutomationService>();
-=======
+builder.Services.AddScoped<IMarketingDiscoveryService, MarketingDiscoveryService>();
+builder.Services.AddSingleton<IMarketingTrackingService, MarketingTrackingService>();
+builder.Services.AddHostedService<MarketingDiscoveryScheduler>();
 builder.Services.AddHostedService<MinistryChatAutomationService>();
 builder.Services.AddHostedService<SubscriptionRenewalService>();
 builder.Services.AddHostedService<TenantDomainVerificationService>();
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 builder.Services.AddHostedService<TaskAutomationQueueService>();
+builder.Services.AddHostedService<NotificationDispatchWorker>();
+builder.Services.AddSingleton<TenantAppBuildQueue>();
+builder.Services.AddHostedService<TenantAppBuildWorker>();
 builder.Services.AddHostedService<PrayerIntelligenceMonitorService>();
+builder.Services.AddSingleton<SecurityPostureMonitorService>();
+builder.Services.AddSingleton<ISecurityPostureMonitor>(sp => sp.GetRequiredService<SecurityPostureMonitorService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SecurityPostureMonitorService>());
 builder.Services.AddSingleton<ChatSafetyMonitorService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ChatSafetyMonitorService>());
 builder.Services.AddHttpClient("LinkPreview", client =>
@@ -202,6 +210,24 @@ builder.Services.AddHttpClient("LinkPreview", client =>
 // BUILD APP
 // -------------------------------------------------------
 var app = builder.Build();
+
+// -------------------------------------------------------
+// STARTUP CONFIG WARNINGS
+// -------------------------------------------------------
+{
+    var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+    SmsHelper.Initialize(app.Configuration, startupLogger);
+    foreach (var key in new[] { "Marketing:WebhookSecret", "Marketing:TrackingHashSalt", "Marketing:TwilioWebhookSecret" })
+        if (string.IsNullOrWhiteSpace(app.Configuration[key]))
+            startupLogger.LogWarning("{Key} is not configured — the endpoint(s) that depend on it are effectively disabled until it is set.", key);
+
+    var whatsAppSender = Environment.GetEnvironmentVariable("TWILIO_WHATSAPP_FROM")
+        ?? Environment.GetEnvironmentVariable("TWILIO_MESSAGING_SERVICE_SID")
+        ?? app.Configuration["Twilio:WhatsAppFrom"]
+        ?? app.Configuration["Twilio:MessagingServiceSid"];
+    if (string.IsNullOrWhiteSpace(whatsAppSender))
+        startupLogger.LogWarning("WhatsApp is not ready: configure TWILIO_WHATSAPP_FROM or TWILIO_MESSAGING_SERVICE_SID after registering an approved sender in Twilio.");
+}
 
 // -------------------------------------------------------
 // MIDDLEWARE
@@ -250,6 +276,9 @@ app.UseRouting();
 app.UseCors(CorsPolicy);
 
 app.UseAuthentication();
+app.UseMiddleware<MobileAppAccessMiddleware>();
+app.UseMiddleware<RootTenantOverrideMiddleware>();
+app.UseMiddleware<TenantStorageMiddleware>();
 app.UseMiddleware<AuditTrailMiddleware>();
 app.UseAuthorization();
 app.UseMiddleware<TenantModuleAccessMiddleware>();

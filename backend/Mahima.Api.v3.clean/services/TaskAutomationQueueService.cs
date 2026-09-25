@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Mahima.Api.v3.clean.Data;
 using Mahima.Api.v3.clean.Dtos;
 using Mahima.Api.v3.clean.Hubs;
+using Mahima.Api.v3.clean.Helpers;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -71,7 +72,9 @@ namespace Mahima.Api.v3.clean.Services
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<MahimaDbContext>();
             var chat = scope.ServiceProvider.GetRequiredService<IChatService>();
+            var email = scope.ServiceProvider.GetRequiredService<IEmailService>();
             var pastorBot = scope.ServiceProvider.GetRequiredService<IPastorBotService>();
+            var mobilePush = scope.ServiceProvider.GetServices<IMobilePushNotificationService>().FirstOrDefault();
             var botUserId = await pastorBot.EnsurePastorBotUserAsync(ct);
 
             var conn = db.Database.GetDbConnection();
@@ -85,7 +88,7 @@ namespace Mahima.Api.v3.clean.Services
             {
                 try
                 {
-                    await ProcessOneAsync(conn, chat, botUserId, queueId, ct);
+                    await ProcessOneAsync(conn, chat, email, mobilePush, botUserId, queueId, ct);
                 }
                 catch (Exception ex)
                 {
@@ -99,13 +102,10 @@ namespace Mahima.Api.v3.clean.Services
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
-<<<<<<< HEAD
-=======
 ALTER TABLE public.""Tasks""
     ADD COLUMN IF NOT EXISTS ""ProcessStage"" text NOT NULL DEFAULT 'intake',
     ADD COLUMN IF NOT EXISTS ""UpdatedAt"" timestamp without time zone NULL;
 
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 CREATE TABLE IF NOT EXISTS public.""TaskAutomationQueue"" (
     ""Id"" bigserial PRIMARY KEY,
     ""TaskId"" bigint NOT NULL REFERENCES public.""Tasks""(""Id"") ON DELETE CASCADE,
@@ -122,7 +122,21 @@ CREATE TABLE IF NOT EXISTS public.""TaskAutomationQueue"" (
 CREATE UNIQUE INDEX IF NOT EXISTS ux_task_automation_queue_task_key
     ON public.""TaskAutomationQueue"" (""TaskId"", ""AutomationKey"");
 CREATE INDEX IF NOT EXISTS ix_task_automation_queue_due
-    ON public.""TaskAutomationQueue"" (""Status"", ""ScheduledAtUtc"");";
+    ON public.""TaskAutomationQueue"" (""Status"", ""ScheduledAtUtc"");
+
+CREATE TABLE IF NOT EXISTS public.""TaskAssignmentsV2"" (
+    ""TaskId"" bigint NOT NULL REFERENCES public.""Tasks""(""Id"") ON DELETE CASCADE,
+    ""AssigneeType"" text NOT NULL,
+    ""AssigneeId"" text NOT NULL,
+    ""CreatedAt"" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT ""PK_TaskAssignmentsV2"" PRIMARY KEY (""TaskId"", ""AssigneeType"", ""AssigneeId"")
+);
+
+INSERT INTO public.""TaskAssignmentsV2"" (""TaskId"", ""AssigneeType"", ""AssigneeId"")
+SELECT ""Id"", 'user', ""AssigneeId""::text
+FROM public.""Tasks""
+WHERE ""AssigneeId"" IS NOT NULL
+ON CONFLICT DO NOTHING;";
             await cmd.ExecuteNonQueryAsync(ct);
         }
 
@@ -131,6 +145,14 @@ CREATE INDEX IF NOT EXISTS ix_task_automation_queue_due
             var ids = new List<long>();
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
+UPDATE public.""TaskAutomationQueue""
+SET ""Status"" = 'skipped',
+    ""LastError"" = 'Reminder window passed; suppressed to avoid sending stacked reminders.',
+    ""UpdatedAtUtc"" = now()
+WHERE ""Status"" = 'pending'
+  AND ""AutomationKey"" LIKE 'due-reminder:%'
+  AND ""ScheduledAtUtc"" < now() - interval '18 hours';
+
 WITH due AS (
     SELECT ""Id""
     FROM public.""TaskAutomationQueue""
@@ -152,7 +174,7 @@ RETURNING q.""Id"";";
             return ids;
         }
 
-        private async Task ProcessOneAsync(System.Data.Common.DbConnection conn, IChatService chat, Guid botUserId, long queueId, CancellationToken ct)
+        private async Task ProcessOneAsync(System.Data.Common.DbConnection conn, IChatService chat, IEmailService email, IMobilePushNotificationService? mobilePush, Guid botUserId, long queueId, CancellationToken ct)
         {
             var row = await LoadQueueRowAsync(conn, queueId, ct);
             if (row == null)
@@ -178,13 +200,21 @@ RETURNING q.""Id"";";
             var linkedMessage = $"{row.Message}\n\nOpen task: {link}";
 
             foreach (var userId in recipients.LinkRecipients)
-                await SendDirectAsync(chat, botUserId, userId, linkedMessage, ct);
+            {
+                await SendDirectAsync(chat, mobilePush, botUserId, userId, linkedMessage, ct);
+                await TrySendEmailAsync(conn, email, userId, row.Title, linkedMessage, ct);
+            }
 
             foreach (var userId in recipients.NotifyOnlyRecipients.Except(recipients.LinkRecipients))
-                await SendDirectAsync(chat, botUserId, userId, row.Message, ct);
+            {
+                await SendDirectAsync(chat, mobilePush, botUserId, userId, row.Message, ct);
+                await TrySendEmailAsync(conn, email, userId, row.Title, row.Message, ct);
+            }
 
             await MarkSentAsync(conn, queueId, recipients.LinkRecipients.Count, recipients.NotifyOnlyRecipients.Count, ct);
-            await MarkTaskDoneAsync(conn, row.TaskId, ct);
+            if (!row.AutomationKey.StartsWith("assignment:", StringComparison.OrdinalIgnoreCase)
+                && !row.AutomationKey.StartsWith("due-reminder:", StringComparison.OrdinalIgnoreCase))
+                await MarkTaskDoneAsync(conn, row.TaskId, ct);
         }
 
         private string BuildTaskLink(long taskId)
@@ -193,27 +223,56 @@ RETURNING q.""Id"";";
             return $"{publicUrl}/#/home/tasks?taskId={taskId}";
         }
 
-        private async Task SendDirectAsync(IChatService chat, Guid botUserId, Guid recipientId, string message, CancellationToken ct)
+        private async Task SendDirectAsync(IChatService chat, IMobilePushNotificationService? mobilePush, Guid botUserId, Guid recipientId, string message, CancellationToken ct)
         {
             if (recipientId == Guid.Empty || recipientId == botUserId) return;
             var direct = await chat.CreateOrGetDirectChatAsync(botUserId, recipientId);
             var sent = await chat.AddMessageAsync(direct.Id, botUserId, message, "task-reminder");
             await _hub.Clients.Users(new[] { botUserId.ToString(), recipientId.ToString() })
                 .SendAsync("ReceiveMessage", sent, ct);
+
+            if (mobilePush != null)
+            {
+                try
+                {
+                    await mobilePush.NotifyChatMessageAsync(direct.Id, botUserId, new[] { recipientId }, sent);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Mobile push failed for task reminder to {UserId}", recipientId);
+                }
+            }
+        }
+
+        private async Task TrySendEmailAsync(System.Data.Common.DbConnection conn, IEmailService email, Guid userId, string taskTitle, string message, CancellationToken ct)
+        {
+            try
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText = "SELECT email FROM public.users WHERE id = @id LIMIT 1;";
+                var p = cmd.CreateParameter(); p.ParameterName = "id"; p.Value = userId; cmd.Parameters.Add(p);
+                var address = (await cmd.ExecuteScalarAsync(ct))?.ToString();
+                if (!string.IsNullOrWhiteSpace(address))
+                    await email.SendAsync(address, $"Mahima task: {taskTitle}", $"<p>{System.Net.WebUtility.HtmlEncode(message).Replace("\n", "<br>")}</p>", message);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Task email notification failed for user {UserId}; Jai Masih delivery remains active.", userId);
+            }
         }
 
         private static async Task<QueueRow?> LoadQueueRowAsync(System.Data.Common.DbConnection conn, long queueId, CancellationToken ct)
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
-SELECT q.""TaskId"", q.""Message"", t.""Title"", t.""Status""
+SELECT q.""TaskId"", q.""Message"", t.""Title"", t.""Status"", q.""AutomationKey""
 FROM public.""TaskAutomationQueue"" q
 JOIN public.""Tasks"" t ON t.""Id"" = q.""TaskId""
 WHERE q.""Id"" = @id;";
             var p = cmd.CreateParameter(); p.ParameterName = "id"; p.Value = queueId; cmd.Parameters.Add(p);
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             if (!await reader.ReadAsync(ct)) return null;
-            return new QueueRow(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetInt32(3));
+            return new QueueRow(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetInt32(3), reader.GetString(4));
         }
 
         private static async Task<RecipientSet> ResolveRecipientsAsync(System.Data.Common.DbConnection conn, long taskId, CancellationToken ct)
@@ -226,7 +285,7 @@ WHERE q.""Id"" = @id;";
             {
                 cmd.CommandText = @"
 SELECT ""AssigneeType"", ""AssigneeId""
-FROM public.""TaskAssignees""
+FROM public.""TaskAssignmentsV2""
 WHERE ""TaskId"" = @taskId;";
                 var p = cmd.CreateParameter(); p.ParameterName = "taskId"; p.Value = taskId; cmd.Parameters.Add(p);
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -329,11 +388,7 @@ WHERE ""Id"" = @id;";
             await cmd.ExecuteNonQueryAsync(ct);
         }
 
-        private sealed record QueueRow(long TaskId, string Message, string Title, int TaskStatus);
+        private sealed record QueueRow(long TaskId, string Message, string Title, int TaskStatus, string AutomationKey);
         private sealed record RecipientSet(HashSet<Guid> LinkRecipients, HashSet<Guid> NotifyOnlyRecipients);
     }
-<<<<<<< HEAD
 }
-=======
-}
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)

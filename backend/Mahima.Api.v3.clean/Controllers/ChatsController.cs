@@ -32,11 +32,7 @@ namespace Mahima.Api.v3.clean.Controllers
         private readonly ITenantContextService _tenantContext;
         private readonly ILicensingService _licensing;
 
-<<<<<<< HEAD
-        public ChatsController(IChatService chatService, MahimaDbContext db, IHubContext<ChatHub> hub, IEnumerable<IMobilePushNotificationService> mobilePushServices, IPastorBotService pastorBot, ILogger<ChatsController> logger)
-=======
-        public ChatsController(IChatService chatService, MahimaDbContext db, IHubContext<ChatHub> hub, IEnumerable<IMobilePushNotificationService> mobilePushServices, ILogger<ChatsController> logger, ITenantContextService tenantContext, ILicensingService licensing)
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
+        public ChatsController(IChatService chatService, MahimaDbContext db, IHubContext<ChatHub> hub, IEnumerable<IMobilePushNotificationService> mobilePushServices, IPastorBotService pastorBot, ILogger<ChatsController> logger, ITenantContextService tenantContext, ILicensingService licensing)
         {
             _chatService = chatService ?? throw new ArgumentNullException(nameof(chatService));
             _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -232,9 +228,7 @@ ADD COLUMN IF NOT EXISTS group_photo_url text;");
 
             page = Math.Max(1, page);
             limit = Math.Clamp(limit, 1, 1000);
-<<<<<<< HEAD
             var offset = (page - 1) * limit;
-=======
 
             var query = _db.Users
                 .AsNoTracking()
@@ -243,7 +237,6 @@ ADD COLUMN IF NOT EXISTS group_photo_url text;");
             var tenantId = await GetCurrentTenantIdAsync();
             query = query.Where(u => u.TenantId == tenantId);
 
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
             var term = search?.Trim();
 
             try
@@ -589,11 +582,6 @@ LIMIT @limit OFFSET @offset;";
         [HttpGet("{chatId:guid}/members")]
         public async Task<IActionResult> GetChatMembers(Guid chatId)
         {
-<<<<<<< HEAD
-            var userId = User.GetUserIdGuid();
-            if (userId == Guid.Empty) return Unauthorized();
-
-=======
             var licenseError = await RequireChatModuleAsync();
             if (licenseError != null) return licenseError;
 
@@ -602,29 +590,20 @@ LIMIT @limit OFFSET @offset;";
 
             await EnsureGroupPhotoColumnAsync();
             var tenantId = await GetCurrentTenantIdAsync();
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
             var authorizedMemberIds = await GetAuthorizedMemberIdsAsync(chatId, userId);
             if (authorizedMemberIds == null) return Forbid();
 
             var chat = await _db.Chats
                 .AsNoTracking()
-<<<<<<< HEAD
-                .Where(c => c.Id == chatId)
-=======
                 .Where(c => c.Id == chatId && c.TenantId == tenantId)
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
                 .Select(c => new
                 {
                     c.Id,
                     c.Name,
                     c.IsGroup,
                     c.CreatedBy,
-<<<<<<< HEAD
-                    c.CreatedAt
-=======
                     c.CreatedAt,
                     c.GroupPhotoUrl
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
                 })
                 .FirstOrDefaultAsync();
 
@@ -632,11 +611,7 @@ LIMIT @limit OFFSET @offset;";
 
             var members = await _db.ChatMembers
                 .AsNoTracking()
-<<<<<<< HEAD
-                .Where(cm => cm.ChatId == chatId)
-=======
                 .Where(cm => cm.ChatId == chatId && cm.Chat.TenantId == tenantId && cm.User.TenantId == tenantId)
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
                 .OrderByDescending(cm => cm.UserId == chat.CreatedBy || (cm.Role != null && cm.Role.ToLower() == "admin"))
                 .ThenBy(cm => cm.User != null ? cm.User.DisplayName ?? cm.User.Username ?? cm.User.Email : null)
                 .Select(cm => new
@@ -657,10 +632,7 @@ LIMIT @limit OFFSET @offset;";
                 chatId = chat.Id,
                 name = chat.Name,
                 isGroup = chat.IsGroup,
-<<<<<<< HEAD
-=======
                 groupPhotoUrl = chat.GroupPhotoUrl,
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
                 adminUserId = chat.CreatedBy,
                 createdAt = chat.CreatedAt,
                 memberCount = members.Count,
@@ -668,8 +640,6 @@ LIMIT @limit OFFSET @offset;";
             });
         }
 
-<<<<<<< HEAD
-=======
         public class UpdateGroupPhotoDto
         {
             public string? PhotoUrl { get; set; }
@@ -720,7 +690,6 @@ LIMIT @limit OFFSET @offset;";
             return Ok(currentSummary);
         }
 
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
         [HttpPost("{chatId}/messages")]
         public async Task<IActionResult> PostMessage(Guid chatId, [FromBody] CreateMessageDto dto)
         {

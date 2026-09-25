@@ -1,4 +1,4 @@
-// src/utils/chatNotifications.js
+﻿// src/utils/chatNotifications.js
 //
 // Cross-platform notification helpers for the Jai Masih chat:
 //   - Plays a short two-tone beep / "Jai Masih" voice when a new message arrives
@@ -21,14 +21,11 @@
 //   } from "./chatNotifications";
 //
 import { speakText } from "./speech";
+import { chatNotificationTitle } from "./chatBranding";
 
 const STORAGE_KEY = "jm_chat_muted";
-const NOTIFICATION_TITLE = "Jai Masih Di";
-<<<<<<< HEAD
-const DEFAULT_NOTIFICATION_ICON = mahimaLogoUrl;
-=======
+const notificationTitle = () => chatNotificationTitle();
 const DEFAULT_NOTIFICATION_ICON = "";
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 const ANDROID_NOTIFICATION_ICON = "ic_stat_jai_masih";
 
 let audioCtx = null;
@@ -121,7 +118,7 @@ function buzz() {
 function speakJaiMasih() {
   if (typeof window === "undefined") return false;
   if (window.Capacitor?.Plugins?.TextToSpeech?.speak && window.Capacitor?.isNativePlatform?.()) {
-    return speakText(NOTIFICATION_TITLE, { lang: "hi-IN", rate: 0.95, maxLength: 80 });
+    return speakText(notificationTitle(), { lang: notificationTitle() === "Jai Masih Di" ? "hi-IN" : "en-US", rate: 0.95, maxLength: 80 });
   }
 
   const synth = window.speechSynthesis;
@@ -129,7 +126,7 @@ function speakJaiMasih() {
 
   try {
     synth.cancel();
-    const u = new SpeechSynthesisUtterance(NOTIFICATION_TITLE);
+    const u = new SpeechSynthesisUtterance(notificationTitle());
     u.rate = 0.95;
     u.pitch = 1.05;
     u.volume = 1.0;
@@ -386,7 +383,7 @@ export async function notifyIncomingMessage({
   // Always attempt the native tray notification first.
   // scheduleNativeNotification returns false if the Capacitor plugin isn't
   // available (i.e. running in a plain web browser, not in the Android app).
-  const nativeOk = await scheduleNativeNotification(NOTIFICATION_TITLE, {
+  const nativeOk = await scheduleNativeNotification(notificationTitle(), {
     body,
     tag: chatId ? `chat:${chatId}` : undefined,
     data: { kind: "message", chatId },
@@ -400,7 +397,7 @@ export async function notifyIncomingMessage({
 
   // Web-only fallback: browser Notification API banner when tab is not active
   if (!nativeOk && !isTabActive()) {
-    showSystemNotification(NOTIFICATION_TITLE, {
+    showSystemNotification(notificationTitle(), {
       body,
       tag: chatId ? `chat:${chatId}` : undefined,
       data: { kind: "message", chatId },
@@ -431,14 +428,14 @@ export async function notifyIncomingCall({
   buzz();
 
   // Try native tray notification first; fall back to browser API
-  const nativeOk = await scheduleNativeNotification(NOTIFICATION_TITLE, {
+  const nativeOk = await scheduleNativeNotification(notificationTitle(), {
     body: `${callerName}: incoming ${type} call. Tap to answer.`,
     tag: chatId ? `call:${chatId}` : "call",
     data: { kind: "call", chatId, type },
   });
 
   if (!nativeOk && !isTabActive()) {
-    showSystemNotification(NOTIFICATION_TITLE, {
+    showSystemNotification(notificationTitle(), {
       body: `${callerName}: incoming ${type} call. Tap to answer.`,
       tag: chatId ? `call:${chatId}` : "call",
       data: { kind: "call", chatId, type },

@@ -1,18 +1,13 @@
-import { apiFetch } from "./fetch-auth-shim";
+﻿import { apiFetch } from "./fetch-auth-shim";
 import { getToken } from "./auth";
 import { showSystemNotification } from "./chatNotifications";
 
 const FCM_TOKEN_KEY = "mahima_fcm_token";
-<<<<<<< HEAD
-=======
 const PENDING_CALL_KEY = "mahima_pending_call_notification";
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 
 let registrationStarted = false;
 let listenersAttached = false;
 
-<<<<<<< HEAD
-=======
 function openNotificationTarget(data = {}) {
   if (data.kind === "call" && data.chatId) {
     try {
@@ -35,7 +30,6 @@ function openNotificationTarget(data = {}) {
   }
 }
 
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 function getCapacitor() {
   try {
     return typeof window !== "undefined" ? window.Capacitor : null;
@@ -154,13 +148,7 @@ export async function registerMobilePushNotifications(user = null) {
 
     PushNotifications.addListener?.("pushNotificationActionPerformed", (action) => {
       const data = action?.notification?.data || {};
-<<<<<<< HEAD
-      if (data.chatId || data.kind === "message") {
-        window.location.hash = "#/home/chat";
-      }
-=======
       openNotificationTarget(data);
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
     });
   }
 

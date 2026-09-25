@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
@@ -20,56 +20,37 @@ namespace Mahima.Api.v3.clean.Services
         public const string BotUsername = "pastor.bot";
         public const string BotUserCode = "BOTPASTOR";
         public const string JaiMasihChatName = "Jai Masih";
+        public const string InternationalChatName = "Praise The Lord";
         private static readonly Guid RootTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
 
         private readonly MahimaDbContext _db;
         private readonly IChatService _chatService;
-<<<<<<< HEAD
-        private readonly ILlmProvider _llm;
-        private readonly IScriptureService _scripture;
-=======
         private readonly ITenantContextService _tenantContext;
         private readonly ILlmProvider _llmProvider;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IConfiguration _config;
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
         private readonly ILogger<PastorBotService> _logger;
 
         public PastorBotService(
             MahimaDbContext db,
             IChatService chatService,
-<<<<<<< HEAD
-            ILlmProvider llm,
-            IScriptureService scripture,
-=======
             ITenantContextService tenantContext,
             ILlmProvider llmProvider,
             IHttpClientFactory httpClientFactory,
             IConfiguration config,
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
             ILogger<PastorBotService> logger)
         {
             _db = db;
             _chatService = chatService;
-<<<<<<< HEAD
-            _llm = llm;
-            _scripture = scripture;
-=======
             _tenantContext = tenantContext;
             _llmProvider = llmProvider;
             _httpClientFactory = httpClientFactory;
             _config = config;
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
             _logger = logger;
         }
 
         public async Task<Guid> EnsurePastorBotUserAsync(CancellationToken ct = default)
         {
-<<<<<<< HEAD
-            var conn = _db.Database.GetDbConnection();
-            if (conn.State != ConnectionState.Open)
-                await conn.OpenAsync(ct);
-=======
             var tenantId = await GetCurrentTenantIdAsync(ct);
             return await EnsurePastorBotUserAsync(tenantId, ct);
         }
@@ -78,84 +59,41 @@ namespace Mahima.Api.v3.clean.Services
         {
             var username = tenantId == RootTenantId ? BotUsername : $"pastor.bot.{tenantId:N}";
             var userCode = tenantId == RootTenantId ? BotUserCode : $"BOT{tenantId:N}";
+            var email = tenantId == RootTenantId
+                ? "pastor.bot@mahimaministries.local"
+                : $"pastor.bot+{tenantId:N}@mahimaministries.local";
 
             var bot = await _db.Users.FirstOrDefaultAsync(u =>
                 u.TenantId == tenantId &&
                 (u.Username == username || u.UserCode == userCode), ct);
-            if (bot != null) return bot.Id;
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 
-            static void AddParam(System.Data.Common.DbCommand cmd, string name, object value)
+            if (bot == null)
             {
-<<<<<<< HEAD
-                var p = cmd.CreateParameter();
-                p.ParameterName = name;
-                p.Value = value;
-                cmd.Parameters.Add(p);
-            }
-=======
-                TenantId = tenantId,
-                Username = username,
-                UserCode = userCode,
-                DisplayName = "AI Pastor",
-                Email = tenantId == RootTenantId
-                    ? "pastor.bot@mahimaministries.local"
-                    : $"pastor.bot+{tenantId:N}@mahimaministries.local",
-                Role = "admin",
-                JoinDate = DateTime.UtcNow
-            };
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
-
-            await using (var find = conn.CreateCommand())
-            {
-                find.CommandText = @"
-SELECT id
-FROM public.users
-WHERE username = @username OR ""UserCode"" = @userCode
-LIMIT 1";
-                AddParam(find, "@username", BotUsername);
-                AddParam(find, "@userCode", BotUserCode);
-
-                var existing = await find.ExecuteScalarAsync(ct);
-                if (existing is Guid existingId)
+                bot = new User
                 {
-                    await using var update = conn.CreateCommand();
-                    update.CommandText = @"
-UPDATE public.users
-SET username = COALESCE(NULLIF(username, ''), @username),
-    ""UserCode"" = COALESCE(NULLIF(""UserCode"", ''), @userCode),
-    displayname = @displayName,
-    email = COALESCE(NULLIF(email, ''), @email),
-    role = COALESCE(NULLIF(role, ''), @role)
-WHERE id = @id";
-                    AddParam(update, "@id", existingId);
-                    AddParam(update, "@username", BotUsername);
-                    AddParam(update, "@userCode", BotUserCode);
-                    AddParam(update, "@displayName", "AI Pastor");
-                    AddParam(update, "@email", "pastor.bot@mahimaministries.local");
-                    AddParam(update, "@role", "admin");
-                    await update.ExecuteNonQueryAsync(ct);
-                    return existingId;
-                }
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    Username = username,
+                    UserCode = userCode,
+                    DisplayName = "AI Pastor",
+                    Email = email,
+                    Role = "admin",
+                    JoinDate = DateTime.UtcNow
+                };
+                _db.Users.Add(bot);
             }
-
-            var botId = Guid.NewGuid();
-            await using (var insert = conn.CreateCommand())
+            else
             {
-                insert.CommandText = @"
-INSERT INTO public.users (id, username, ""UserCode"", displayname, email, role, joindate)
-VALUES (@id, @username, @userCode, @displayName, @email, @role, @joinDate)";
-                AddParam(insert, "@id", botId);
-                AddParam(insert, "@username", BotUsername);
-                AddParam(insert, "@userCode", BotUserCode);
-                AddParam(insert, "@displayName", "AI Pastor");
-                AddParam(insert, "@email", "pastor.bot@mahimaministries.local");
-                AddParam(insert, "@role", "admin");
-                AddParam(insert, "@joinDate", DateTime.UtcNow);
-                await insert.ExecuteNonQueryAsync(ct);
+                bot.Username = string.IsNullOrWhiteSpace(bot.Username) ? username : bot.Username;
+                bot.UserCode = string.IsNullOrWhiteSpace(bot.UserCode) ? userCode : bot.UserCode;
+                bot.DisplayName = string.IsNullOrWhiteSpace(bot.DisplayName) ? "AI Pastor" : bot.DisplayName;
+                bot.Email = string.IsNullOrWhiteSpace(bot.Email) ? email : bot.Email;
+                bot.Role = string.IsNullOrWhiteSpace(bot.Role) ? "admin" : bot.Role;
             }
 
-            return botId;
+            await _db.SaveChangesAsync(ct);
+
+            return bot.Id;
         }
         public async Task<Chat> EnsureJaiMasihChatAsync(CancellationToken ct = default)
         {
@@ -166,19 +104,21 @@ VALUES (@id, @username, @userCode, @displayName, @email, @role, @joinDate)";
         public async Task<Chat> EnsureJaiMasihChatAsync(Guid tenantId, CancellationToken ct = default)
         {
             var botUserId = await EnsurePastorBotUserAsync(tenantId, ct);
+            var countryCode = await _db.Tenants.AsNoTracking().Where(t => t.Id == tenantId).Select(t => t.CountryCode).FirstOrDefaultAsync(ct) ?? "IN";
+            var desiredChatName = countryCode.Equals("IN", StringComparison.OrdinalIgnoreCase) ? JaiMasihChatName : InternationalChatName;
 
             var chat = await _db.Chats
                 .FirstOrDefaultAsync(c =>
                     c.TenantId == tenantId &&
                     c.IsGroup &&
                     c.Name != null &&
-                    c.Name.ToLower() == JaiMasihChatName.ToLower(), ct);
+                    (c.Name.ToLower() == JaiMasihChatName.ToLower() || c.Name.ToLower() == InternationalChatName.ToLower()), ct);
 
             if (chat == null)
             {
                 chat = new Chat
                 {
-                    Name = JaiMasihChatName,
+                    Name = desiredChatName,
                     IsGroup = true,
                     TenantId = tenantId,
                     CreatedBy = botUserId,
@@ -187,28 +127,17 @@ VALUES (@id, @username, @userCode, @displayName, @email, @role, @joinDate)";
                 _db.Chats.Add(chat);
                 await _db.SaveChangesAsync(ct);
             }
-
-<<<<<<< HEAD
-            var allUserIds = new List<Guid>();
-            var conn = _db.Database.GetDbConnection();
-            if (conn.State != ConnectionState.Open)
-                await conn.OpenAsync(ct);
-            await using (var usersCmd = conn.CreateCommand())
+            else if (!string.Equals(chat.Name, desiredChatName, StringComparison.Ordinal))
             {
-                usersCmd.CommandText = "SELECT id FROM public.users";
-                await using var reader = await usersCmd.ExecuteReaderAsync(ct);
-                while (await reader.ReadAsync(ct))
-                {
-                    if (!reader.IsDBNull(0)) allUserIds.Add(reader.GetGuid(0));
-                }
+                chat.Name = desiredChatName;
+                await _db.SaveChangesAsync(ct);
             }
-=======
+
             var allUserIds = await _db.Users
                 .AsNoTracking()
                 .Where(u => u.TenantId == tenantId)
                 .Select(u => u.Id)
                 .ToListAsync(ct);
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 
             if (!allUserIds.Contains(botUserId))
                 allUserIds.Add(botUserId);
@@ -346,6 +275,31 @@ VALUES (@id, @username, @userCode, @displayName, @email, @role, @joinDate)";
                 Language = normalizedLanguage,
                 Persona = normalizedPersona
             };
+        }
+
+        public async Task<PastorBotReplyDto> ReadArtifactAsync(Guid userId, string artifactName, string artifactText, string? note = null, string? language = null, string? persona = null, CancellationToken ct = default)
+        {
+            var normalizedLanguage = NormalizeLanguage(language);
+            var normalizedPersona = NormalizePersona(persona, normalizedLanguage);
+            var safeName = string.IsNullOrWhiteSpace(artifactName) ? "uploaded artifact" : artifactName.Trim();
+            var text = (artifactText ?? string.Empty).Trim();
+            var userNote = (note ?? string.Empty).Trim();
+            var languageInstruction = normalizedLanguage == "hi" ? "Reply completely in natural Hindi."
+                : normalizedLanguage == "pa" ? "Reply completely in natural Punjabi."
+                : "Reply completely in clear English.";
+            var prompt = $@"Explain the user-uploaded artifact named '{safeName}'. Summarize its purpose and important content, explain difficult terms in plain language, identify key dates, amounts, decisions, risks, or action items when present, and answer the user's note. Do not invent content that is not in the artifact. Distinguish facts in the artifact from your interpretation. If the material is incomplete or unreadable, say so. {languageInstruction}
+
+User note: {(string.IsNullOrWhiteSpace(userNote) ? "Please explain this artifact clearly." : userNote)}
+
+Extracted artifact content:
+{text[..Math.Min(text.Length, 50000)]}";
+
+            var answer = await TryAskConfiguredAiAsync(userId, prompt, normalizedLanguage, normalizedPersona, null, ct);
+            answer ??= normalizedLanguage == "hi" ? $"मैं अभी AI से इस फ़ाइल का विश्लेषण नहीं कर पाया। फ़ाइल: {safeName}. कृपया बाद में पुनः प्रयास करें।"
+                : normalizedLanguage == "pa" ? $"ਮੈਂ ਇਸ ਵੇਲੇ AI ਨਾਲ ਇਸ ਫਾਈਲ ਦਾ ਵਿਸ਼ਲੇਸ਼ਣ ਨਹੀਂ ਕਰ ਸਕਿਆ। ਫਾਈਲ: {safeName}. ਕਿਰਪਾ ਕਰਕੇ ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ।"
+                : $"I could not analyze {safeName} with AI right now. Please try again shortly.";
+
+            return new PastorBotReplyDto { Answer = answer, Source = _llmProvider.IsConfigured ? "ai" : "fallback", Language = normalizedLanguage, Persona = normalizedPersona };
         }
 
         public async Task<IReadOnlyList<MessageDto>> TryReplyInChatAsync(Guid chatId, Guid userId, string? userMessage, CancellationToken ct = default)
@@ -640,7 +594,7 @@ VALUES (@id, @username, @userCode, @displayName, @email, @role, @joinDate)";
         {
             var basePrompt = BuildSystemPrompt(language, persona) + @"
 
-You are handling a consent-based ReadMe camera session. Use the camera image only as user-shared context. You may mention simple visible, non-sensitive observations such as posture, lighting, setting, facial expression if clearly visible, or signs that the user seems tired or thoughtful, but state them gently as possibilities. Do not identify the person. Do not infer or mention age, gender, ethnicity, caste, religion, health status, mental health diagnosis, disability, income, private relationships, or hidden emotions as facts. Do not judge appearance. Do not provide medical, legal, or crisis diagnosis. If the note suggests self-harm, abuse, or emergency danger, encourage immediate help from local emergency services and a trusted human pastor/counsellor.
+You are handling a consent-based ReadMe image session. The image may be a camera frame or another user-uploaded visual artifact. Use it only as user-shared context. Explain visible artifact content clearly. If a person is visible, mention only simple, non-sensitive observations and frame them gently as possibilities. Do not identify a person or infer sensitive traits. Do not judge appearance or provide medical, legal, or crisis diagnosis. If the note suggests self-harm, abuse, or emergency danger, encourage immediate help from local emergency services and a trusted human pastor/counsellor.
 
 Respond as a pastoral counsellor using this shape:
 1. A warm greeting.
@@ -666,9 +620,9 @@ Respond as a pastoral counsellor using this shape:
 
             return language switch
             {
-                "hi" => $"Read this user-shared camera image with care and consent. User note: {safeNote}. Give biblical pastoral counsel in Hindi only.",
-                "pa" => $"Read this user-shared camera image with care and consent. User note: {safeNote}. Give biblical pastoral counsel in Punjabi only.",
-                _ => $"Read this user-shared camera image with care and consent. User note: {safeNote}. Give biblical pastoral counsel in English only."
+                "hi" => $"Read and explain this user-shared image with care and consent. User note: {safeNote}. Respond in Hindi only.",
+                "pa" => $"Read and explain this user-shared image with care and consent. User note: {safeNote}. Respond in Punjabi only.",
+                _ => $"Read and explain this user-shared image with care and consent. User note: {safeNote}. Respond in English only."
             };
         }
 
@@ -690,42 +644,6 @@ Respond as a pastoral counsellor using this shape:
             return sb.ToString().Trim();
         }
 
-        private async Task<string?> TryAskConfiguredAiAsync(Guid userId, string question, string language, string persona, IReadOnlyList<PastorBotMessageDto>? conversation, CancellationToken ct)
-        {
-            // No external API key needed — the configured ILlmProvider may be a
-            // self-hosted model (Ollama / vLLM) or any OpenAI-compatible endpoint.
-            if (!_llm.IsConfigured) return null;
-
-            // System prompt + retrieved Scripture grounding (RAG-lite).
-            var system = BuildSystemPrompt(language, persona);
-            var verses = _scripture.FindRelevant(question, language, 3);
-            var grounding = BuildScriptureGrounding(verses);
-            if (grounding.Length > 0)
-                system += "\n\n" + grounding;
-
-            var request = new LlmRequest { Temperature = 0.6, MaxTokens = 700 };
-            request.Messages.Add(LlmMessage.System(system));
-
-            // Carry recent conversation turns for context.
-            foreach (var message in (conversation ?? Array.Empty<PastorBotMessageDto>()).TakeLast(12))
-            {
-                var text = (message.Text ?? string.Empty).Trim();
-                if (string.IsNullOrWhiteSpace(text)) continue;
-
-                var role = string.Equals(message.Role, "pastor", StringComparison.OrdinalIgnoreCase)
-                           || string.Equals(message.Role, "assistant", StringComparison.OrdinalIgnoreCase)
-                    ? "assistant"
-                    : "user";
-
-                request.Messages.Add(new LlmMessage(role, text));
-            }
-
-            request.Messages.Add(LlmMessage.User(question));
-
-<<<<<<< HEAD
-            var result = await _llm.CompleteAsync(request, ct);
-            if (!result.Success)
-=======
         private static List<LlmMessage> BuildLlmMessages(string system, string question, IReadOnlyList<PastorBotMessageDto>? conversation)
         {
             var messages = new List<LlmMessage> { LlmMessage.System(system) };
@@ -748,84 +666,44 @@ Respond as a pastoral counsellor using this shape:
 
         private async Task<string?> TryAskConfiguredAiAsync(Guid userId, string question, string language, string persona, IReadOnlyList<PastorBotMessageDto>? conversation, CancellationToken ct)
         {
-            if (_llmProvider.IsConfigured)
+            if (!_llmProvider.IsConfigured) return null;
+
+            var system = BuildSystemPrompt(language, persona);
+            var result = await _llmProvider.CompleteAsync(new LlmRequest
             {
-                var system = BuildSystemPrompt(language, persona);
-                var result = await _llmProvider.CompleteAsync(new LlmRequest
-                {
-                    Messages = BuildLlmMessages(system, question, conversation),
-                    Temperature = 0.6,
-                    MaxTokens = 700
-                }, ct);
+                Messages = BuildLlmMessages(system, question, conversation),
+                Temperature = 0.6,
+                MaxTokens = 700
+            }, ct);
 
-                if (result.Success && !string.IsNullOrWhiteSpace(result.Text))
-                    return result.Text;
+            if (result.Success && !string.IsNullOrWhiteSpace(result.Text))
+                return result.Text;
 
-                _logger.LogWarning("PastorBot LLM provider {Provider} failed: {Error}", result.Provider, result.Error);
-            }
-
-            var apiKey = _config["PastorBot:OpenAiApiKey"];
-            if (string.IsNullOrWhiteSpace(apiKey)) return null;
-
-            try
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
-            {
-                _logger.LogWarning("AI Counseller LLM call failed ({Provider}/{Model}): {Error}",
-                    result.Provider, result.Model, result.Error);
-                return null;
-            }
-
-            return result.Text;
+            _logger.LogWarning("PastorBot LLM provider {Provider} failed: {Error}", result.Provider, result.Error);
+            return null;
         }
 
         private async Task<string?> TryAskConfiguredVisionAsync(Guid userId, string imageDataUrl, string note, string language, string persona, CancellationToken ct)
         {
-<<<<<<< HEAD
-            if (!_llm.IsConfigured) return null;
-=======
-            if (_llmProvider.IsConfigured && IsSupportedImageDataUrl(imageDataUrl))
-            {
-                var result = await _llmProvider.CompleteVisionAsync(new LlmVisionRequest
-                {
-                    SystemPrompt = BuildReadMeSystemPrompt(language, persona),
-                    UserText = BuildReadMeVisionPrompt(note, language),
-                    ImageUrl = imageDataUrl,
-                    Temperature = 0.55,
-                    MaxTokens = 850
-                }, ct);
+            if (!_llmProvider.IsConfigured || !IsSupportedImageDataUrl(imageDataUrl))
+                return null;
 
-                if (result.Success && !string.IsNullOrWhiteSpace(result.Text))
-                    return result.Text;
-
-                _logger.LogWarning("PastorBot vision provider {Provider} failed: {Error}", result.Provider, result.Error);
-            }
-
-            var apiKey = _config["PastorBot:OpenAiApiKey"];
-            if (string.IsNullOrWhiteSpace(apiKey)) return null;
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
-            if (!IsSupportedImageDataUrl(imageDataUrl)) return null;
-
-            var request = new LlmVisionRequest
+            var result = await _llmProvider.CompleteVisionAsync(new LlmVisionRequest
             {
                 SystemPrompt = BuildReadMeSystemPrompt(language, persona),
                 UserText = BuildReadMeVisionPrompt(note, language),
                 ImageUrl = imageDataUrl,
-                Temperature = 0.6,
-                MaxTokens = 700
-            };
+                Temperature = 0.55,
+                MaxTokens = 850
+            }, ct);
 
-            var result = await _llm.CompleteVisionAsync(request, ct);
-            if (!result.Success)
-            {
-                // capability-unavailable just means the configured model is text-only;
-                // that is expected for many self-hosted setups — fall back quietly.
-                if (result.Error != "capability-unavailable")
-                    _logger.LogWarning("AI Counseller vision call failed ({Provider}/{Model}): {Error}",
-                        result.Provider, result.Model, result.Error);
-                return null;
-            }
+            if (result.Success && !string.IsNullOrWhiteSpace(result.Text))
+                return result.Text;
 
-            return result.Text;
+            if (result.Error != "capability-unavailable")
+                _logger.LogWarning("PastorBot vision provider {Provider} failed: {Error}", result.Provider, result.Error);
+
+            return null;
         }
 
         private static bool IsSupportedImageDataUrl(string value) =>

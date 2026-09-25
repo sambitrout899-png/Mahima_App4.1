@@ -1,17 +1,9 @@
-<<<<<<< HEAD
-using System.Collections.Generic;
-=======
 ﻿using System.Collections.Generic;
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 
 namespace Mahima.Api.v3.clean.Services.Ai
 {
     /// <summary>
-<<<<<<< HEAD
-    /// Supplies relevant Bible verses to ground the AI Pastor's answers.
-=======
     /// Supplies relevant Bible verses to ground the AI Counseller's answers.
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
     ///
     /// This is the "equipped with Bible verses" part of the autonomous pastor:
     /// instead of trusting the model to recall references correctly (models do
@@ -43,3 +35,4 @@ namespace Mahima.Api.v3.clean.Services.Ai
         public override string ToString() => $"\"{Text}\" — {Reference}";
     }
 }
+

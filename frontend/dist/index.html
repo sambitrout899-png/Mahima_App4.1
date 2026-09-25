@@ -9,9 +9,8 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Mahima Frontend</title>
 
-    <!-- fonts -->
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <!-- First-party font: preloaded locally so the shell never swaps between
+         a Windows fallback and a late Google Fonts response. -->
 
     <style>
       html,body {
@@ -55,7 +54,7 @@
           // Use the same host that .env.production / .env.mobile uses
           // to avoid certificate-SAN mismatches between www. and bare domain.
           window.__API_BASE__ = isCapacitor
-            ? "https://mahimaministries.in/api"
+            ? "https://beta.mahimaministries.in/api"
             : "/api";
 
           console.info("window.__API_BASE__ set to", window.__API_BASE__, "(capacitor:", isCapacitor + ")");
@@ -64,13 +63,8 @@
         }
       })();
     </script>
-<<<<<<< HEAD
-    <script type="module" crossorigin src="/assets/index-C9cYp16p.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-CHaSmGgl.css">
-=======
-    <script type="module" crossorigin src="/assets/index-BXgu38ao.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-wUdK6p22.css">
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
+    <script type="module" crossorigin src="/assets/index-DY8tFIPa.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-D3o3XeD9.css">
   </head>
   <body>
     <div id="root"></div>
@@ -78,5 +72,3 @@
     <!-- app entry -->
   </body>
 </html>
-
-

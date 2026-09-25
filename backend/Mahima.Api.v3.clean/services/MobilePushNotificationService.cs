@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -81,17 +81,8 @@ namespace Mahima.Api.v3.clean.Services
                 .ToList();
             if (recipientIds.Count == 0) return;
 
-<<<<<<< HEAD
-            var tokens = await ReadTokensAsync(recipientIds);
-            if (tokens.Count == 0)
-            {
-                _logger.LogWarning("Skipping mobile push: no registered device tokens for {RecipientCount} recipient(s).", recipientIds.Count);
-                return;
-            }
-=======
             var tokens = await ReadTokensAsync(chatId, recipientIds);
             if (tokens.Count == 0) return;
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 
             var senderName = await _db.Users
                 .AsNoTracking()
@@ -141,7 +132,7 @@ namespace Mahima.Api.v3.clean.Services
                 .ToList();
             if (recipientIds.Count == 0) return;
 
-            var tokens = await ReadTokensAsync(recipientIds);
+            var tokens = await ReadTokensAsync(chatId, recipientIds);
             if (tokens.Count == 0)
             {
                 _logger.LogWarning("Skipping incoming call push: no registered device tokens for {RecipientCount} recipient(s).", recipientIds.Count);
@@ -246,159 +237,7 @@ namespace Mahima.Api.v3.clean.Services
             }
         }
 
-<<<<<<< HEAD
-        // ── OAuth2 access token via service account ──────────────────────────
-
-        private async Task SendIncomingCallFcmV1Async(
-            string projectId, string accessToken, string deviceToken,
-            string callerName, Guid chatId, Guid callerId, string callType)
-        {
-            var url = $"https://fcm.googleapis.com/v1/projects/{projectId}/messages:send";
-            var title = callType == "video" ? "Incoming video call" : "Incoming audio call";
-
-            var payload = new
-            {
-                message = new
-                {
-                    token = deviceToken,
-                    notification = new
-                    {
-                        title,
-                        body = $"{callerName} is calling you"
-                    },
-                    android = new
-                    {
-                        priority = "HIGH",
-                        notification = new
-                        {
-                            channel_id = "jai-masih",
-                            sound = "default",
-                            icon = "ic_stat_jai_masih",
-                            color = "#047857",
-                            tag = $"call-{chatId}"
-                        }
-                    },
-                    data = new Dictionary<string, string>
-                    {
-                        ["kind"] = "call",
-                        ["chatId"] = chatId.ToString(),
-                        ["callerId"] = callerId.ToString(),
-                        ["callerName"] = callerName,
-                        ["callType"] = callType
-                    }
-                }
-            };
-
-            var client = _httpClientFactory.CreateClient();
-            using var request = new HttpRequestMessage(HttpMethod.Post, url);
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-            request.Content = new StringContent(
-                JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-
-            try
-            {
-                using var response = await client.SendAsync(request);
-                if (!response.IsSuccessStatusCode)
-                {
-                    var body = await response.Content.ReadAsStringAsync();
-                    _logger.LogWarning("FCM V1 incoming call push failed for token ...{Suffix}: {Status} {Body}",
-                        deviceToken.Length > 8 ? deviceToken[^8..] : deviceToken,
-                        response.StatusCode, body);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "FCM V1 incoming call push HTTP request failed.");
-            }
-        }
-
-        private async Task<string> GetAccessTokenAsync()
-        {
-            await _credLock.WaitAsync();
-            try
-            {
-                if (_cachedCredential == null)
-                    _cachedCredential = BuildCredential();
-
-                var scoped = _cachedCredential.CreateScoped(FcmScope);
-                var token = await scoped.UnderlyingCredential.GetAccessTokenForRequestAsync();
-                return token;
-            }
-            finally
-            {
-                _credLock.Release();
-            }
-        }
-
-        private GoogleCredential BuildCredential()
-        {
-            // 1. Try raw JSON from config / env (useful on servers without a file system path)
-            var rawJson = ResolveFirebaseServiceAccount();
-
-            if (!string.IsNullOrWhiteSpace(rawJson))
-            {
-                rawJson = rawJson.Trim();
-
-                // Could be a file path or actual JSON content.
-                if (File.Exists(rawJson))
-                {
-                    _logger.LogInformation("FCM V1: loading service account from file path in config.");
-                    return GoogleCredential.FromFile(rawJson);
-                }
-
-                if (rawJson.StartsWith("{", StringComparison.Ordinal))
-                {
-                    _logger.LogInformation("FCM V1: loading service account from JSON string in config.");
-                    return GoogleCredential.FromJson(rawJson);
-                }
-
-                _logger.LogWarning(
-                    "FCM V1: configured Firebase service account path does not exist or is not readable: {Path}",
-                    rawJson);
-            }
-
-            // 2. Fallback: Application Default Credentials
-            //    (works on GCP / Cloud Run / GKE without any extra config).
-            _logger.LogInformation("FCM V1: using Application Default Credentials.");
-            return GoogleCredential.GetApplicationDefault();
-        }
-
-        // ── helpers ──────────────────────────────────────────────────────────
-
-        private string? ResolveFirebaseProjectId()
-        {
-            return FirstNonEmpty(
-                _configuration["MobilePush:FirebaseProjectId"],
-                _configuration["Firebase:ProjectId"],
-                Environment.GetEnvironmentVariable("MAHIMA_FIREBASE_PROJECT_ID"),
-                Environment.GetEnvironmentVariable("FIREBASE_PROJECT_ID"));
-        }
-
-        private string? ResolveFirebaseServiceAccount()
-        {
-            return FirstNonEmpty(
-                _configuration["MobilePush:ServiceAccountJson"],
-                _configuration["Firebase:ServiceAccountJson"],
-                Environment.GetEnvironmentVariable("MAHIMA_FIREBASE_SERVICE_ACCOUNT_JSON"),
-                Environment.GetEnvironmentVariable("FIREBASE_SERVICE_ACCOUNT_JSON"),
-                Environment.GetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS"));
-        }
-
-        private static string? FirstNonEmpty(params string?[] values)
-        {
-            foreach (var value in values)
-            {
-                if (!string.IsNullOrWhiteSpace(value))
-                    return value.Trim();
-            }
-
-            return null;
-        }
-
-        private async Task<List<string>> ReadTokensAsync(IEnumerable<Guid> userIds)
-=======
         private async Task<List<string>> ReadTokensAsync(Guid chatId, IEnumerable<Guid> userIds)
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
         {
             var tenantId = await _db.Chats
                 .AsNoTracking()
@@ -421,6 +260,111 @@ namespace Mahima.Api.v3.clean.Services
                 .Where(token => !string.IsNullOrWhiteSpace(token))
                 .Distinct()
                 .ToList();
+        }
+
+        private string? ResolveFirebaseProjectId()
+        {
+            return FirstNonEmpty(
+                _configuration["MobilePush:FirebaseProjectId"],
+                _configuration["Firebase:ProjectId"],
+                Environment.GetEnvironmentVariable("MAHIMA_FIREBASE_PROJECT_ID"),
+                Environment.GetEnvironmentVariable("FIREBASE_PROJECT_ID"));
+        }
+
+        private async Task<string> GetAccessTokenAsync()
+        {
+            await _credLock.WaitAsync();
+            try
+            {
+                if (_cachedCredential == null)
+                {
+                    var source = FirstNonEmpty(
+                        _configuration["MobilePush:ServiceAccountJson"],
+                        _configuration["Firebase:ServiceAccountJson"],
+                        Environment.GetEnvironmentVariable("MAHIMA_FIREBASE_SERVICE_ACCOUNT_JSON"),
+                        Environment.GetEnvironmentVariable("FIREBASE_SERVICE_ACCOUNT_JSON"),
+                        Environment.GetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS"));
+
+                    if (string.IsNullOrWhiteSpace(source))
+                        throw new InvalidOperationException("Firebase service account is not configured.");
+
+                    var trimmed = source.Trim();
+                    _cachedCredential = trimmed.StartsWith("{", StringComparison.Ordinal)
+                        ? GoogleCredential.FromJson(trimmed)
+                        : GoogleCredential.FromFile(trimmed);
+
+                    _cachedCredential = _cachedCredential.CreateScoped(FcmScope);
+                }
+            }
+            finally
+            {
+                _credLock.Release();
+            }
+
+            return await _cachedCredential.UnderlyingCredential.GetAccessTokenForRequestAsync();
+        }
+
+        private async Task SendIncomingCallFcmV1Async(
+            string projectId,
+            string accessToken,
+            string deviceToken,
+            string callerName,
+            Guid chatId,
+            Guid callerId,
+            string callType)
+        {
+            var url = $"https://fcm.googleapis.com/v1/projects/{projectId}/messages:send";
+            var payload = new
+            {
+                message = new
+                {
+                    token = deviceToken,
+                    notification = new
+                    {
+                        title = callType == "video" ? "Incoming video call" : "Incoming audio call",
+                        body = $"{callerName} is calling you"
+                    },
+                    android = new
+                    {
+                        priority = "HIGH",
+                        notification = new
+                        {
+                            channel_id = "jai-masih-calls",   // must match channel created in initNativeApp.js
+                            sound = "default",
+                            icon = "ic_stat_jai_masih",
+                            color = "#047857",
+                            tag = chatId.ToString()
+                        }
+                    },
+                    data = new Dictionary<string, string>
+                    {
+                        ["kind"] = "incoming_call",
+                        ["chatId"] = chatId.ToString(),
+                        ["callerId"] = callerId.ToString(),
+                        ["callerName"] = callerName,
+                        ["callType"] = callType
+                    }
+                }
+            };
+
+            var client = _httpClientFactory.CreateClient();
+            using var request = new HttpRequestMessage(HttpMethod.Post, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+            using var response = await client.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                _logger.LogWarning("FCM V1 incoming call push failed for token ...{Suffix}: {Status} {Body}",
+                    deviceToken.Length > 8 ? deviceToken[^8..] : deviceToken,
+                    response.StatusCode,
+                    body);
+            }
+        }
+
+        private static string? FirstNonEmpty(params string?[] values)
+        {
+            return values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v))?.Trim();
         }
 
         private static string BuildPreview(MessageDto message)

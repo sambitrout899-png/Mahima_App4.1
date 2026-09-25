@@ -1,9 +1,5 @@
-<<<<<<< HEAD
 ﻿using Mahima.Api.v3.clean.Data;
-=======
-using Mahima.Api.v3.clean.Data;
 using Mahima.Api.v3.clean.Services;
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -251,17 +247,10 @@ VALUES
             if (!CurrentUserIsAdmin())
                 return Forbid();
 
-<<<<<<< HEAD
-            var day = DateTime.SpecifyKind((date ?? DateTime.UtcNow).Date, DateTimeKind.Utc);
-            var nextDay = day.AddDays(1);
-            var attendanceDay = DateTime.SpecifyKind(day, DateTimeKind.Unspecified);
-            var attendanceNextDay = attendanceDay.AddDays(1);
-=======
             var day = DateTime.SpecifyKind((date ?? DateTime.UtcNow).Date, DateTimeKind.Unspecified);
             var nextDay = day.AddDays(1);
             var dayUtc = DateTime.SpecifyKind(day, DateTimeKind.Utc);
             var nextDayUtc = dayUtc.AddDays(1);
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
             var now = DateTime.UtcNow;
             var tenantId = await GetCurrentTenantIdAsync();
 
@@ -317,11 +306,7 @@ VALUES
 
             var attendanceRows = await _db.AttendanceRecords
                 .AsNoTracking()
-<<<<<<< HEAD
-                .Where(a => a.Date >= attendanceDay && a.Date < attendanceNextDay)
-=======
                 .Where(a => a.TenantId == tenantId && a.Date >= day && a.Date < nextDay)
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
                 .ToListAsync(HttpContext.RequestAborted);
 
             var attendanceKeys = new HashSet<string>(
@@ -399,9 +384,6 @@ VALUES
                 .Take(1000)
                 .ToListAsync(HttpContext.RequestAborted);
 
-<<<<<<< HEAD
-            var flaggedMessages = Array.Empty<object>().ToList();
-=======
             var messages = await _db.Messages
                 .AsNoTracking()
                 .Include(m => m.Sender)
@@ -425,7 +407,6 @@ VALUES
                 })
                 .Take(50)
                 .ToList();
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 
             var attachments = await _db.Attachments
                 .AsNoTracking()

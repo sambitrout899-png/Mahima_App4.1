@@ -1,4 +1,4 @@
-using Mahima.Api.v3.clean.Data;
+﻿using Mahima.Api.v3.clean.Data;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -262,92 +262,10 @@ namespace Mahima.Api.v3.clean.services.Counselling
 
             await _db.SaveChangesAsync(ct);
         }
-<<<<<<< HEAD
-
-=======
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
         public async Task DeleteSessionAsync(
             Guid sessionId,
             CancellationToken ct = default)
         {
-<<<<<<< HEAD
-            var session = await _db.CounsellingSessions
-                .FirstOrDefaultAsync(s => s.Id == sessionId, ct);
-
-            if (session == null)
-            {
-                throw new InvalidOperationException($"Session {sessionId} not found.");
-            }
-
-            var caseId = session.CaseId;
-            _db.CounsellingSessions.Remove(session);
-            await _db.SaveChangesAsync(ct);
-
-            var caseHasSessions = await _db.CounsellingSessions
-                .AnyAsync(s => s.CaseId == caseId, ct);
-
-            if (!caseHasSessions)
-            {
-                var caseEntity = await _db.CounsellingCases
-                    .FirstOrDefaultAsync(c => c.Id == caseId, ct);
-
-                if (caseEntity != null)
-                {
-                    _db.CounsellingCases.Remove(caseEntity);
-                    await _db.SaveChangesAsync(ct);
-                }
-            }
-        }
-
-        private static bool TryNormalizeStatus(string? status, out CounsellingSessionStatus parsedStatus)
-        {
-            parsedStatus = default;
-            if (string.IsNullOrWhiteSpace(status)) return false;
-
-            var key = status.Trim().Replace(" ", "", StringComparison.Ordinal).Replace("-", "", StringComparison.Ordinal).ToLowerInvariant();
-            if (key is "all" or "any") return false;
-
-            var normalized = key switch
-            {
-                "new" or "request" or "requested" or "pending" => nameof(CounsellingSessionStatus.Requested),
-                "scheduled" or "booked" => nameof(CounsellingSessionStatus.Scheduled),
-                "completed" or "complete" or "closed" => nameof(CounsellingSessionStatus.Completed),
-                "cancelled" or "canceled" => nameof(CounsellingSessionStatus.Cancelled),
-                _ => status.Trim()
-            };
-
-            return Enum.TryParse(normalized, true, out parsedStatus);
-        }
-
-        private static CounsellingSessionSummaryDto Map(CounsellingSession session)
-        {
-            var caseEntity = session.Case;
-            var candidate = caseEntity?.Candidate;
-
-            return new CounsellingSessionSummaryDto
-            {
-                SessionId = session.Id,
-                CaseId = session.CaseId,
-                CandidateId = caseEntity?.CandidateId ?? Guid.Empty,
-                CandidateName = candidate?.FullName ?? "-",
-                Email = candidate?.Email,
-                Phone = candidate?.Phone,
-                IsChurchMember = candidate?.IsChurchMember ?? false,
-                MemberId = candidate?.MemberId,
-                IssueCategory = caseEntity?.IssueCategory ?? "-",
-                Description = caseEntity?.Description,
-                SessionType = session.SessionType.ToString(),
-                Status = session.Status.ToString(),
-                ScheduledAt = session.ScheduledAt,
-                Location = session.Location,
-                CounselorId = session.CounselorId,
-                TokenNumber = session.TokenNumber,
-                Outcome = session.Outcome.ToString(),
-                Notes = session.Notes,
-                CreatedAt = session.CreatedAt,
-                CompletedAt = session.CompletedAt
-            };
-=======
             var tenantId = await GetCurrentTenantIdAsync();
             var session = await _db.CounsellingSessions
                 .Include(s => s.Case)
@@ -359,7 +277,29 @@ namespace Mahima.Api.v3.clean.services.Counselling
 
             _db.CounsellingSessions.Remove(session);
             await _db.SaveChangesAsync(ct);
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
+        }
+
+        private static bool TryNormalizeStatus(string? status, out CounsellingSessionStatus parsed)
+        {
+            parsed = default;
+            if (string.IsNullOrWhiteSpace(status))
+                return false;
+
+            return Enum.TryParse(status.Trim(), true, out parsed);
+        }
+
+        private static CounsellingSessionSummaryDto Map(CounsellingSession session)
+        {
+            return new CounsellingSessionSummaryDto
+            {
+                SessionId = session.Id,
+                CandidateName = session.Case?.Candidate?.FullName ?? string.Empty,
+                IssueCategory = session.Case?.IssueCategory,
+                SessionType = session.SessionType.ToString(),
+                Status = session.Status.ToString(),
+                ScheduledAt = session.ScheduledAt,
+                TokenNumber = session.TokenNumber
+            };
         }
     }
 }

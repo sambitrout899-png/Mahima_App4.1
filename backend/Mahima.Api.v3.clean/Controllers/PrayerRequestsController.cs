@@ -238,15 +238,10 @@ namespace Mahima.Api.v3.clean.Controllers
             if (currentUserId != null && currentUserId == SuperUserGuid) isPrivileged = true;
             var canManagePrayerDesk = isPrivileged || (currentUserId.HasValue && await HasPrayerDeskAccessAsync(currentUserId.Value));
 
-<<<<<<< HEAD
-            IQueryable<PrayerRequest> query = _db.PrayerRequests.AsNoTracking();
-            if (!canManagePrayerDesk)
-=======
             var tenantId = GetCurrentTenantId();
             IQueryable<PrayerRequest> query = _db.PrayerRequests.AsNoTracking()
                 .Where(p => p.TenantId == tenantId);
             if (!isPrivileged)
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
             {
                 if (currentUserId == null)
                     return Forbid();
@@ -307,161 +302,6 @@ namespace Mahima.Api.v3.clean.Controllers
             });
 
             return Ok(dto);
-        }
-
-        [HttpGet("testimonies")]
-        [Authorize]
-        public async Task<IActionResult> GetTestimonies()
-        {
-            await EnsureTestimonySchemaAsync();
-            var currentUserId = GetCurrentUserGuid();
-            var roles = GetCurrentUserRoles().ToList();
-            var isPrivileged = IsPrivilegedUser(roles) || currentUserId == SuperUserGuid;
-
-            var conn = _db.Database.GetDbConnection();
-            if (conn.State != ConnectionState.Open) await conn.OpenAsync();
-
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"
-                SELECT t.id, t.prayerrequestid, t.userid, t.title, t.testimonytext, t.testimonytexthindi, t.imageurl, t.voiceurl,
-                       t.createdat, t.updatedat, p.createdby, p.message AS prayermessage, p.closecomment
-                FROM prayertestimonies t
-                JOIN prayerrequests p ON p.id = t.prayerrequestid
-                WHERE (@isAdmin = true OR t.userid = @userId)
-                ORDER BY COALESCE(t.updatedat, t.createdat) DESC;";
-            AddParam(cmd, "isAdmin", isPrivileged);
-            AddParam(cmd, "userId", currentUserId ?? Guid.Empty);
-
-            var rows = new List<object>();
-            using var reader = await cmd.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
-            {
-                rows.Add(MapTestimony(reader));
-            }
-            return Ok(rows);
-        }
-
-        [HttpPut("testimonies/{id:long}")]
-        [Authorize]
-        public async Task<IActionResult> UpdateTestimony(long id, [FromBody] PrayerTestimonyDto dto)
-        {
-            await EnsureTestimonySchemaAsync();
-            var currentUserId = GetCurrentUserGuid();
-            var roles = GetCurrentUserRoles().ToList();
-            var isPrivileged = IsPrivilegedUser(roles) || currentUserId == SuperUserGuid;
-            if (currentUserId == null) return Unauthorized();
-
-            var conn = _db.Database.GetDbConnection();
-            if (conn.State != ConnectionState.Open) await conn.OpenAsync();
-
-            var testimonyText = dto?.TestimonyText?.Trim();
-            var testimonyTextHindi = dto?.TestimonyTextHindi?.Trim();
-            if (!string.IsNullOrWhiteSpace(testimonyText) && string.IsNullOrWhiteSpace(testimonyTextHindi))
-            {
-                testimonyTextHindi = await GenerateHindiTestimonyAsync(testimonyText);
-            }
-
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"
-                UPDATE prayertestimonies
-                SET title = @title,
-                    testimonytext = @text,
-                    testimonytexthindi = COALESCE(NULLIF(@textHindi, ''), testimonytexthindi),
-                    imageurl = @image,
-                    voiceurl = @voice,
-                    updatedat = now()
-                WHERE id = @id AND (@isAdmin = true OR userid = @userId)
-                RETURNING id, prayerrequestid, userid, title, testimonytext, testimonytexthindi, imageurl, voiceurl, createdat, updatedat,
-                          '' AS createdby, '' AS prayermessage, '' AS closecomment;";
-            AddParam(cmd, "id", id);
-            AddParam(cmd, "isAdmin", isPrivileged);
-            AddParam(cmd, "userId", currentUserId.Value);
-            AddParam(cmd, "title", (object?)dto?.Title?.Trim() ?? DBNull.Value);
-            AddParam(cmd, "text", (object?)testimonyText ?? DBNull.Value);
-            AddParam(cmd, "textHindi", (object?)testimonyTextHindi ?? DBNull.Value);
-            AddParam(cmd, "image", (object?)dto?.ImageUrl?.Trim() ?? DBNull.Value);
-            AddParam(cmd, "voice", (object?)dto?.VoiceUrl?.Trim() ?? DBNull.Value);
-
-            using var reader = await cmd.ExecuteReaderAsync();
-            if (!await reader.ReadAsync()) return NotFound();
-            return Ok(MapTestimony(reader));
-        }
-
-        [HttpPost("testimonies/backfill-hindi")]
-        [Authorize]
-        public async Task<IActionResult> BackfillHindiTestimonies()
-        {
-            await EnsureTestimonySchemaAsync();
-            var currentUserId = GetCurrentUserGuid();
-            var roles = GetCurrentUserRoles().ToList();
-            var isPrivileged = IsPrivilegedUser(roles) || currentUserId == SuperUserGuid;
-            if (!isPrivileged) return Forbid("Only administrators can backfill testimony translations.");
-
-            var conn = _db.Database.GetDbConnection();
-            if (conn.State != ConnectionState.Open) await conn.OpenAsync();
-
-            var candidates = new List<(long Id, string English)>();
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.CommandText = @"
-                    SELECT id, testimonytext
-                    FROM prayertestimonies
-                    WHERE NULLIF(trim(COALESCE(testimonytext, '')), '') IS NOT NULL
-                      AND NULLIF(trim(COALESCE(testimonytexthindi, '')), '') IS NULL
-                    ORDER BY id;";
-
-                using var reader = await cmd.ExecuteReaderAsync();
-                while (await reader.ReadAsync())
-                {
-                    var text = reader["testimonytext"] == DBNull.Value ? null : reader["testimonytext"]?.ToString();
-                    if (!string.IsNullOrWhiteSpace(text))
-                        candidates.Add((Convert.ToInt64(reader["id"]), text.Trim()));
-                }
-            }
-
-            var updated = 0;
-            var skipped = 0;
-            var failed = 0;
-
-            foreach (var item in candidates)
-            {
-                string? hindi;
-                try
-                {
-                    hindi = await GenerateHindiTestimonyAsync(item.English);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Could not translate testimony {TestimonyId} to Hindi", item.Id);
-                    failed++;
-                    continue;
-                }
-
-                if (string.IsNullOrWhiteSpace(hindi))
-                {
-                    skipped++;
-                    continue;
-                }
-
-                using var update = conn.CreateCommand();
-                update.CommandText = @"
-                    UPDATE prayertestimonies
-                    SET testimonytexthindi = @hindi,
-                        updatedat = now()
-                    WHERE id = @id
-                      AND NULLIF(trim(COALESCE(testimonytexthindi, '')), '') IS NULL;";
-                AddParam(update, "id", item.Id);
-                AddParam(update, "hindi", hindi.Trim());
-                updated += await update.ExecuteNonQueryAsync();
-            }
-
-            return Ok(new
-            {
-                total = candidates.Count,
-                updated,
-                skipped,
-                failed
-            });
         }
 
         // helper to safely read CloseComment via reflection (or null)
@@ -858,7 +698,7 @@ GROUP BY prayerrequestid;";
 
             try
             {
-                await _hub.Clients.All.SendAsync("PrayerResponseCreated", new
+                await _hub.Clients.Group(ChatHub.TenantGroupName(tenantId)).SendAsync("PrayerResponseCreated", new
                 {
                     id = response.Id,
                     prayerRequestId = response.PrayerRequestId,
@@ -907,7 +747,7 @@ GROUP BY prayerrequestid;";
 
             try
             {
-                await _hub.Clients.All.SendAsync("PrayerResponseDeleted", new { id = resp.Id, prayerRequestId = id });
+                await _hub.Clients.Group(ChatHub.TenantGroupName(tenantId)).SendAsync("PrayerResponseDeleted", new { id = resp.Id, prayerRequestId = id });
             }
             catch
             {
@@ -981,7 +821,7 @@ GROUP BY prayerrequestid;";
 
                     try
                     {
-                        await _hub.Clients.All.SendAsync("PrayerRequestDeleted", new { id });
+                        await _hub.Clients.Group(ChatHub.TenantGroupName(tenantId)).SendAsync("PrayerRequestDeleted", new { id });
                         foreach (var resp in responses)
                         {
                             var idProp = resp.GetType().GetProperty("Id");
@@ -991,7 +831,7 @@ GROUP BY prayerrequestid;";
                                 var val = idProp.GetValue(resp);
                                 if (val != null) respId = Convert.ToInt64(val);
                             }
-                            await _hub.Clients.All.SendAsync("PrayerResponseDeleted", new { id = respId, prayerRequestId = id });
+                            await _hub.Clients.Group(ChatHub.TenantGroupName(tenantId)).SendAsync("PrayerResponseDeleted", new { id = respId, prayerRequestId = id });
                         }
                     }
                     catch
@@ -1100,11 +940,74 @@ GROUP BY prayerrequestid;";
             var isPrivileged = IsPrivilegedUser(GetCurrentUserRoles()) || currentUserId == SuperUserGuid;
             if (!isPrivileged) return Forbid("Only administrators can backfill testimony translations.");
 
+            var tenantId = GetCurrentTenantId();
+            var conn = _db.Database.GetDbConnection();
+            if (conn.State != ConnectionState.Open) await conn.OpenAsync();
+
+            var candidates = new List<(long Id, string English)>();
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = @"
+                    SELECT pt.id, pt.testimonytext
+                    FROM public.prayertestimonies pt
+                    JOIN public.prayerrequests pr ON pr.id = pt.prayerrequestid
+                    WHERE pr.tenant_id = @tenantId
+                      AND NULLIF(trim(COALESCE(pt.testimonytext, '')), '') IS NOT NULL
+                      AND NULLIF(trim(COALESCE(pt.testimonytexthindi, '')), '') IS NULL
+                    ORDER BY pt.id;";
+                AddParam(cmd, "tenantId", tenantId);
+
+                using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    var text = reader["testimonytext"] == DBNull.Value ? null : reader["testimonytext"]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(text))
+                        candidates.Add((Convert.ToInt64(reader["id"]), text.Trim()));
+                }
+            }
+
+            var updated = 0;
+            var skipped = 0;
+            var failed = 0;
+
+            foreach (var item in candidates)
+            {
+                string? hindi;
+                try
+                {
+                    hindi = await GenerateHindiTestimonyAsync(item.English);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not translate testimony {TestimonyId} to Hindi", item.Id);
+                    failed++;
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(hindi))
+                {
+                    skipped++;
+                    continue;
+                }
+
+                using var update = conn.CreateCommand();
+                update.CommandText = @"
+                    UPDATE public.prayertestimonies
+                    SET testimonytexthindi = @hindi,
+                        updatedat = now()
+                    WHERE id = @id
+                      AND NULLIF(trim(COALESCE(testimonytexthindi, '')), '') IS NULL;";
+                AddParam(update, "id", item.Id);
+                AddParam(update, "hindi", hindi.Trim());
+                updated += await update.ExecuteNonQueryAsync();
+            }
+
             return Ok(new
             {
-                updated = 0,
-                skipped = 0,
-                message = "Hindi testimony backfill is available in PROD AI flow; DEV tenant-safe endpoint is ready for manual edits."
+                total = candidates.Count,
+                updated,
+                skipped,
+                failed
             });
         }
 
@@ -1182,32 +1085,6 @@ GROUP BY prayerrequestid;";
                 ?? User?.FindFirst("username")?.Value;
         }
 
-        private async Task EnsureTestimonySchemaAsync()
-        {
-            var conn = _db.Database.GetDbConnection();
-            if (conn.State != ConnectionState.Open) await conn.OpenAsync();
-
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"
-                CREATE TABLE IF NOT EXISTS prayertestimonies (
-                    id bigserial PRIMARY KEY,
-                    prayerrequestid bigint NOT NULL UNIQUE,
-                    userid uuid NULL,
-                    title text NULL,
-                    testimonytext text NULL,
-                    testimonytexthindi text NULL,
-                    imageurl text NULL,
-                    voiceurl text NULL,
-                    createdat timestamp without time zone NOT NULL DEFAULT now(),
-                    updatedat timestamp without time zone NULL
-                );";
-            await cmd.ExecuteNonQueryAsync();
-
-            using var alter = conn.CreateCommand();
-            alter.CommandText = "ALTER TABLE prayertestimonies ADD COLUMN IF NOT EXISTS testimonytexthindi text NULL;";
-            await alter.ExecuteNonQueryAsync();
-        }
-
         private async Task EnsureTestimonyForAnsweredPrayerAsync(PrayerRequest request)
         {
             try
@@ -1272,38 +1149,6 @@ GROUP BY prayerrequestid;";
 
             var answer = ai.Answer?.Trim();
             return string.IsNullOrWhiteSpace(answer) ? null : answer;
-        }
-
-        private static void AddParam(System.Data.Common.DbCommand cmd, string name, object? value)
-        {
-            var p = cmd.CreateParameter();
-            p.ParameterName = name.StartsWith("@") ? name : "@" + name;
-            p.Value = value ?? DBNull.Value;
-            cmd.Parameters.Add(p);
-        }
-
-        private static object MapTestimony(System.Data.Common.DbDataReader reader)
-        {
-            string? S(string name) => reader[name] == DBNull.Value ? null : reader[name]?.ToString();
-            DateTime? D(string name) => reader[name] == DBNull.Value ? null : Convert.ToDateTime(reader[name]);
-            Guid? G(string name) => reader[name] == DBNull.Value ? null : Guid.TryParse(reader[name]?.ToString(), out var g) ? g : null;
-            return new
-            {
-                id = Convert.ToInt64(reader["id"]),
-                prayerRequestId = Convert.ToInt64(reader["prayerrequestid"]),
-                userId = G("userid"),
-                title = S("title"),
-                testimonyText = S("testimonytext"),
-                testimonyTextHindi = S("testimonytexthindi"),
-                testimonyTextHi = S("testimonytexthindi"),
-                imageUrl = S("imageurl"),
-                voiceUrl = S("voiceurl"),
-                createdAt = D("createdat"),
-                updatedAt = D("updatedat"),
-                createdBy = S("createdby"),
-                prayerMessage = S("prayermessage"),
-                closeComment = S("closecomment")
-            };
         }
 
         private IEnumerable<string> GetCurrentUserRoles()
@@ -1382,13 +1227,5 @@ GROUP BY prayerrequestid;";
         public string? CloseComment { get; set; }
     }
 
-    public class PrayerTestimonyDto
-    {
-        public string? Title { get; set; }
-        public string? TestimonyText { get; set; }
-        public string? TestimonyTextHindi { get; set; }
-        public string? ImageUrl { get; set; }
-        public string? VoiceUrl { get; set; }
-    }
 }
 

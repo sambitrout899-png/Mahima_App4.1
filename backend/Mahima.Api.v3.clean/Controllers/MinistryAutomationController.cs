@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
@@ -113,6 +113,7 @@ namespace Mahima.Api.v3.clean.Controllers
             var messageType = (dto?.MessageType ?? "daily-word").Trim().ToLowerInvariant();
             var nowLocal = DateTime.UtcNow.AddHours(5.5);
             var languages = await ResolveLanguagesAsync(dto?.Languages);
+            if (languages.Count == 0) return BadRequest("No requested language is currently enabled.");
             var message = BuildMultilingualMessage(languages, code => MinistryMessageFactory.Build(messageType, nowLocal, code));
             if (string.IsNullOrWhiteSpace(message))
                 return BadRequest("Unknown message type.");
@@ -130,6 +131,7 @@ namespace Mahima.Api.v3.clean.Controllers
                 requestedLanguages = new List<string> { dto!.Language! };
 
             var languages = await ResolveLanguagesAsync(requestedLanguages);
+            if (languages.Count == 0) return BadRequest("No requested language is currently enabled.");
             var fallbackMessage = (dto?.Message ?? string.Empty).Trim();
             var messageMap = new Dictionary<string, string>(dto?.Messages ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase);
             var message = BuildMultilingualMessage(languages, code =>
@@ -218,6 +220,7 @@ namespace Mahima.Api.v3.clean.Controllers
         {
             var users = await ResolveWelcomeUsersAsync(dto, pendingOnly: true);
             var languages = await ResolveLanguagesAsync(dto?.Languages);
+            if (languages.Count == 0) return BadRequest("No requested language is currently enabled.");
 
             if (users.Count == 0)
             {
@@ -354,15 +357,18 @@ namespace Mahima.Api.v3.clean.Controllers
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            if (requested.Count == 0)
-                requested.AddRange(new[] { "en", "hi", "pa" });
-
             var enabled = await _db.AppLanguages
                 .AsNoTracking()
                 .Where(l => l.Enabled)
                 .OrderBy(l => l.DisplayOrder)
                 .ThenBy(l => l.Name)
                 .ToListAsync();
+
+            if (requested.Count == 0)
+            {
+                var configuredDefault = enabled.FirstOrDefault(l => l.IsDefault) ?? enabled.FirstOrDefault();
+                if (configuredDefault != null) requested.Add(configuredDefault.Code);
+            }
 
             var byCode = enabled.ToDictionary(l => l.Code.ToLowerInvariant(), l => l, StringComparer.OrdinalIgnoreCase);
             var result = new List<LanguageChoice>();
@@ -371,11 +377,9 @@ namespace Mahima.Api.v3.clean.Controllers
             {
                 if (byCode.TryGetValue(code, out var language))
                     result.Add(new LanguageChoice(language.Code, string.IsNullOrWhiteSpace(language.Name) ? LanguageName(code) : language.Name));
-                else
-                    result.Add(new LanguageChoice(code, LanguageName(code)));
             }
 
-            return result.Count > 0 ? result : new List<LanguageChoice> { new LanguageChoice("en", "English") };
+            return result;
         }
 
         private static string LanguageName(string code)
@@ -440,110 +444,33 @@ namespace Mahima.Api.v3.clean.Controllers
         {
             var tenantId = await GetCurrentTenantIdAsync();
             var idList = (ids ?? Array.Empty<Guid>()).Distinct().ToList();
-<<<<<<< HEAD
-            var conn = _db.Database.GetDbConnection();
-            if (conn.State != ConnectionState.Open)
-                await conn.OpenAsync(ct);
-
-            var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            await using (var colCmd = conn.CreateCommand())
-            {
-                colCmd.CommandText = "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'users';";
-                await using var reader = await colCmd.ExecuteReaderAsync(ct);
-                while (await reader.ReadAsync(ct))
-                    columns.Add(reader.GetString(0));
-            }
-
-            string Expr(params string[] names)
-            {
-                var column = names.FirstOrDefault(columns.Contains);
-                return column == null ? "NULL" : $@"u.""{column}""";
-            }
-
-            var idExpr = Expr("id");
-            var usernameExpr = Expr("username");
-            var emailExpr = Expr("email");
-            var displayNameExpr = Expr("displayname");
-            var roleExpr = Expr("role");
-            var joinDateExpr = Expr("joindate");
-            var userCodeExpr = Expr("UserCode", "usercode");
-            var isDeletedExpr = Expr("isdeleted", "IsDeleted");
-
-            var conditions = new List<string>
-            {
-                $"COALESCE(({usernameExpr})::text, '') <> @botUsername",
-                $"COALESCE(({userCodeExpr})::text, '') <> @botCode",
-                $"COALESCE(({usernameExpr})::text, '') NOT ILIKE 'deleted_%'",
-                $"COALESCE(({displayNameExpr})::text, '') NOT ILIKE 'deleted_%'",
-                $"COALESCE(({emailExpr})::text, '') NOT ILIKE 'deleted_%'"
-            };
-
-            if (isDeletedExpr != "NULL")
-                conditions.Add($"COALESCE(({isDeletedExpr})::boolean, false) = false");
-
-            await using var cmd = conn.CreateCommand();
-            var botUsername = cmd.CreateParameter();
-            botUsername.ParameterName = "@botUsername";
-            botUsername.Value = PastorBotService.BotUsername;
-            cmd.Parameters.Add(botUsername);
-
-            var botCode = cmd.CreateParameter();
-            botCode.ParameterName = "@botCode";
-            botCode.Value = PastorBotService.BotUserCode;
-            cmd.Parameters.Add(botCode);
-=======
             var query = _db.Users
                 .AsNoTracking()
                 .Where(u => u.TenantId == tenantId)
                 .Where(u => u.Username != PastorBotService.BotUsername && u.UserCode != PastorBotService.BotUserCode);
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 
             if (idList.Count > 0)
             {
-                var idParams = new List<string>();
-                for (var i = 0; i < idList.Count; i++)
-                {
-                    var p = cmd.CreateParameter();
-                    p.ParameterName = $"@id{i}";
-                    p.Value = idList[i];
-                    cmd.Parameters.Add(p);
-                    idParams.Add(p.ParameterName);
-                }
-                conditions.Add($@"({idExpr}) IN ({string.Join(",", idParams)})");
+                query = query.Where(u => idList.Contains(u.Id));
             }
 
-            cmd.CommandText = $@"
-                SELECT
-                    {idExpr} AS id,
-                    COALESCE(({displayNameExpr})::text, ({usernameExpr})::text, ({emailExpr})::text, 'New member') AS name,
-                    ({usernameExpr})::text AS username,
-                    ({emailExpr})::text AS email,
-                    ({roleExpr})::text AS role,
-                    COALESCE(({joinDateExpr})::timestamp, now()) AS joindate
-                FROM public.users u
-                WHERE {string.Join(" AND ", conditions)};";
-
-            var users = new List<WelcomeCandidate>();
-            await using (var reader = await cmd.ExecuteReaderAsync(ct))
-            {
-                while (await reader.ReadAsync(ct))
+            return await query
+                .OrderByDescending(u => u.JoinDate)
+                .Take(500)
+                .Select(u => new WelcomeCandidate
                 {
-                    if (reader["id"] == DBNull.Value || !Guid.TryParse(reader["id"]?.ToString(), out var id))
-                        continue;
-
-                    users.Add(new WelcomeCandidate
-                    {
-                        Id = id,
-                        Name = reader["name"]?.ToString() ?? "New member",
-                        Username = reader["username"] == DBNull.Value ? null : reader["username"]?.ToString(),
-                        Email = reader["email"] == DBNull.Value ? null : reader["email"]?.ToString(),
-                        Role = reader["role"] == DBNull.Value ? null : reader["role"]?.ToString(),
-                        JoinDate = reader["joindate"] == DBNull.Value ? DateTime.UtcNow : DateTime.SpecifyKind(Convert.ToDateTime(reader["joindate"]), DateTimeKind.Utc)
-                    });
-                }
-            }
-
-            return users;
+                    Id = u.Id,
+                    Name = !string.IsNullOrWhiteSpace(u.DisplayName)
+                        ? u.DisplayName!
+                        : (!string.IsNullOrWhiteSpace(u.Username)
+                            ? u.Username!
+                            : (!string.IsNullOrWhiteSpace(u.Email) ? u.Email! : "New member")),
+                    Username = u.Username,
+                    Email = u.Email,
+                    Role = u.Role,
+                    JoinDate = u.JoinDate
+                })
+                .ToListAsync(ct);
         }
 
         private async Task<List<WelcomeCandidate>> ResolveWelcomeUsersAsync(NewUserWelcomeDraftRequest? dto, bool pendingOnly)

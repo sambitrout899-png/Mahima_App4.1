@@ -1518,12 +1518,8 @@ WHERE id = @Id AND tenant_id = @TenantId;
         cmd.Parameters.AddWithValue("IsPastor", NpgsqlTypes.NpgsqlDbType.Boolean, isPastor ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("PayrollEnabled", NpgsqlTypes.NpgsqlDbType.Boolean, payrollEnabled ?? (object)DBNull.Value);
 
-<<<<<<< HEAD
-        cmd.Parameters.AddWithValue("Id", parsedUserId);
-=======
         cmd.Parameters.AddWithValue("Id", Guid.Parse(id));
         cmd.Parameters.AddWithValue("TenantId", NpgsqlTypes.NpgsqlDbType.Uuid, GetCurrentTenantId());
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 
         var rows = await cmd.ExecuteNonQueryAsync();
 

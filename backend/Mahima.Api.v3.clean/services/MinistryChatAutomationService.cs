@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
@@ -82,19 +82,28 @@ namespace Mahima.Api.v3.clean.Services
         {
             if (!GetBool(settings, "Enabled", true)) return;
             var nowLocal = GetLocalNow(settings);
-            var pastorBot = scope.ServiceProvider.GetRequiredService<IPastorBotService>();
+            var pastorBot = serviceProvider.GetRequiredService<IPastorBotService>();
+            var mobilePush = serviceProvider.GetServices<IMobilePushNotificationService>().FirstOrDefault();
+            var delivery = serviceProvider.GetRequiredService<INotificationDelivery>();
+            var languages = await db.AppLanguages.AsNoTracking()
+                .Where(l => l.Enabled)
+                .OrderByDescending(l => l.IsDefault)
+                .ThenBy(l => l.DisplayOrder)
+                .Select(l => new ValueTuple<string, string>(l.Code, l.Name))
+                .ToListAsync(ct);
+            if (languages.Count == 0)
+            {
+                _logger.LogWarning("Scheduled messages skipped because no application language is enabled.");
+                return;
+            }
 
-            await ProcessBirthdayGreetingsAsync(db, pastorBot, settings, nowLocal, ct);
+            await ProcessBirthdayGreetingsAsync(db, pastorBot, mobilePush, delivery, tenantId, settings, nowLocal, ct);
 
-            var candidates = BuildSchedules(nowLocal, settings)
+            var candidates = BuildSchedules(nowLocal, settings, languages)
                 .Where(s => IsDue(nowLocal, s, settings))
                 .ToList();
             if (candidates.Count == 0) return;
 
-<<<<<<< HEAD
-=======
-            var pastorBot = serviceProvider.GetRequiredService<IPastorBotService>();
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
             foreach (var schedule in candidates)
             {
                 if (await AlreadySentAsync(db, tenantId, schedule.Key, nowLocal.Date, ct)) continue;
@@ -102,7 +111,7 @@ namespace Mahima.Api.v3.clean.Services
                 var content = schedule.BuildMessage(nowLocal);
                 MessageDto sent = await pastorBot.SendJaiMasihMessageAsync(content, tenantId, ct);
                 await RecordSentAsync(db, tenantId, schedule.Key, nowLocal.Date, ct);
-                await NotifyChatAsync(db, sent, ct);
+                await NotifyChatAsync(db, sent, mobilePush, delivery, ScheduleSubject(schedule.Key), ct);
 
                 _logger.LogInformation("Sent scheduled Jai Masih message {MessageKey} for tenant {TenantId} on {LocalDate}", schedule.Key, tenantId, nowLocal.Date);
             }
@@ -111,6 +120,9 @@ namespace Mahima.Api.v3.clean.Services
         private async Task ProcessBirthdayGreetingsAsync(
             MahimaDbContext db,
             IPastorBotService pastorBot,
+            IMobilePushNotificationService? mobilePush,
+            INotificationDelivery delivery,
+            Guid tenantId,
             IReadOnlyDictionary<string, string> settings,
             DateTime nowLocal,
             CancellationToken ct)
@@ -128,7 +140,11 @@ namespace Mahima.Api.v3.clean.Services
                 cmd.CommandText = @"
 SELECT id, displayname, username, ""Birthday""
 FROM public.users
-WHERE ""Birthday"" IS NOT NULL";
+WHERE tenant_id = @tenantId AND ""Birthday"" IS NOT NULL";
+                var tenantParam = cmd.CreateParameter();
+                tenantParam.ParameterName = "tenantId";
+                tenantParam.Value = tenantId;
+                cmd.Parameters.Add(tenantParam);
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct))
                 {
@@ -147,7 +163,7 @@ WHERE ""Birthday"" IS NOT NULL";
             foreach (var user in birthdayUsers)
             {
                 var key = $"birthday-greeting:{user.Id}";
-                if (await AlreadySentAsync(db, key, nowLocal.Date, ct)) continue;
+                if (await AlreadySentAsync(db, tenantId, key, nowLocal.Date, ct)) continue;
 
                 var name = string.IsNullOrWhiteSpace(user.DisplayName) ? user.Username : user.DisplayName;
                 var content =
@@ -157,26 +173,58 @@ WHERE ""Birthday"" IS NOT NULL";
                     "Scripture: \"The Lord bless you and keep you; the Lord make his face shine on you and be gracious to you.\" - Numbers 6:24-25\n\n" +
                     "With love and prayers,\nAI Counseller";
 
-                MessageDto sent = await pastorBot.SendJaiMasihMessageAsync(content, ct);
-                await RecordSentAsync(db, key, nowLocal.Date, ct);
-                await NotifyChatAsync(db, sent, ct);
+                MessageDto sent = await pastorBot.SendJaiMasihMessageAsync(content, tenantId, ct);
+                await RecordSentAsync(db, tenantId, key, nowLocal.Date, ct);
+                await NotifyChatAsync(db, sent, mobilePush, delivery, $"Happy Birthday, {name}!", ct);
 
                 _logger.LogInformation("Sent birthday Jai Masih greeting for {UserId} on {LocalDate}", user.Id, nowLocal.Date);
             }
         }
 
-        private async Task NotifyChatAsync(MahimaDbContext db, MessageDto message, CancellationToken ct)
+        private async Task NotifyChatAsync(
+            MahimaDbContext db, MessageDto message, IMobilePushNotificationService? mobilePush,
+            INotificationDelivery delivery, string subject, CancellationToken ct)
         {
             var memberIds = await db.ChatMembers
                 .AsNoTracking()
                 .Where(cm => cm.ChatId == message.ChatId)
-                .Select(cm => cm.UserId.ToString())
+                .Select(cm => cm.UserId)
                 .Distinct()
                 .ToListAsync(ct);
 
-            if (memberIds.Count > 0)
-                await _hub.Clients.Users(memberIds).SendAsync("ReceiveMessage", message, ct);
+            if (memberIds.Count == 0) return;
+
+            await _hub.Clients.Users(memberIds.Select(id => id.ToString()).ToList())
+                .SendAsync("ReceiveMessage", message, ct);
+
+            if (mobilePush != null)
+            {
+                try
+                {
+                    await mobilePush.NotifyChatMessageAsync(message.ChatId, message.SenderId, memberIds, message);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Mobile push failed for ministry broadcast in chat {ChatId}", message.ChatId);
+                }
+            }
+
+            var emails = await db.Users.AsNoTracking()
+                .Where(u => memberIds.Contains(u.Id) && u.Email != null)
+                .Select(u => u.Email!)
+                .ToListAsync(ct);
+
+            await delivery.SendBulkEmailAsync(emails, subject, message.Content ?? "", ct);
         }
+
+        private static string ScheduleSubject(string key) => key switch
+        {
+            "daily-word" => "Today's Word",
+            "welcome" => "Welcome",
+            "night-prayer" => "Night Prayer",
+            "saturday-church-reminder" => "Saturday Reminder",
+            _ => "Mahima Ministry Update"
+        };
 
         private async Task<bool> AlreadySentAsync(MahimaDbContext db, Guid tenantId, string key, DateTime localDate, CancellationToken ct)
         {
@@ -197,19 +245,19 @@ WHERE ""Birthday"" IS NOT NULL";
             await db.SaveChangesAsync(ct);
         }
 
-        private IReadOnlyList<ScheduledMessage> BuildSchedules(DateTime nowLocal, IReadOnlyDictionary<string, string> settings)
+        private IReadOnlyList<ScheduledMessage> BuildSchedules(DateTime nowLocal, IReadOnlyDictionary<string, string> settings, IReadOnlyList<(string Code, string Name)> languages)
         {
             var list = new List<ScheduledMessage>();
 
             if (GetBool(settings, "DailyWordEnabled", true))
-                list.Add(new ScheduledMessage("daily-word", GetTime(settings, "DailyWordTime", "06:30"), _ => BuildDefaultMultilingualMessage("daily-word", nowLocal)));
+                list.Add(new ScheduledMessage("daily-word", GetTime(settings, "DailyWordTime", "06:30"), _ => BuildDefaultMultilingualMessage("daily-word", nowLocal, languages)));
 
             if (GetBool(settings, "WelcomeEnabled", true))
-                list.Add(new ScheduledMessage("welcome", GetTime(settings, "WelcomeTime", "07:00"), _ => BuildDefaultMultilingualMessage("welcome", nowLocal)));
+                list.Add(new ScheduledMessage("welcome", GetTime(settings, "WelcomeTime", "07:00"), _ => BuildDefaultMultilingualMessage("welcome", nowLocal, languages)));
 
             if (GetBool(settings, "NightPrayerEnabled", true))
             {
-                list.Add(new ScheduledMessage("night-prayer", GetNightPrayerTime(settings), _ => BuildDefaultMultilingualMessage("night-prayer", nowLocal))
+                list.Add(new ScheduledMessage("night-prayer", GetNightPrayerTime(settings), _ => BuildDefaultMultilingualMessage("night-prayer", nowLocal, languages))
                 {
                     DaysOfWeek = new HashSet<DayOfWeek> { DayOfWeek.Tuesday, DayOfWeek.Friday }
                 });
@@ -217,7 +265,7 @@ WHERE ""Birthday"" IS NOT NULL";
 
             if (GetBool(settings, "SaturdayReminderEnabled", true))
             {
-                list.Add(new ScheduledMessage("saturday-church-reminder", GetTime(settings, "SaturdayReminderTime", "18:00"), _ => BuildDefaultMultilingualMessage("saturday-church-reminder", nowLocal))
+                list.Add(new ScheduledMessage("saturday-church-reminder", GetTime(settings, "SaturdayReminderTime", "18:00"), _ => BuildDefaultMultilingualMessage("saturday-church-reminder", nowLocal, languages))
                 {
                     DaysOfWeek = new HashSet<DayOfWeek> { DayOfWeek.Saturday }
                 });
@@ -226,17 +274,10 @@ WHERE ""Birthday"" IS NOT NULL";
             return list;
         }
 
-        private static string BuildDefaultMultilingualMessage(string messageType, DateTime nowLocal)
+        private static string BuildDefaultMultilingualMessage(string messageType, DateTime nowLocal, IReadOnlyList<(string Code, string Name)> languages)
         {
-            var languages = new[]
-            {
-                ("en", "English"),
-                ("hi", "Hindi"),
-                ("pa", "Punjabi")
-            };
-
             return string.Join("\n\n", languages.Select(language =>
-                $"{language.Item2} ({language.Item1.ToUpperInvariant()}):\n{MinistryMessageFactory.Build(messageType, nowLocal, language.Item1)}"));
+                $"{language.Name} ({language.Code.ToUpperInvariant()}):\n{MinistryMessageFactory.Build(messageType, nowLocal, language.Code)}"));
         }
 
         private bool IsDue(DateTime nowLocal, ScheduledMessage schedule, IReadOnlyDictionary<string, string> settings)

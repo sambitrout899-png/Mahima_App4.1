@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
@@ -23,6 +23,7 @@ namespace Mahima.Api.v3.clean.Services
     public class ChatSafetyMonitorService : BackgroundService
     {
         private const string ProtectedContentPrefix = "dp:v1:";
+        private static readonly Guid RootTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<ChatSafetyMonitorService> _logger;
         private readonly IDataProtector _messageProtector;
@@ -85,6 +86,7 @@ namespace Mahima.Api.v3.clean.Services
             var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
             var hub = scope.ServiceProvider.GetRequiredService<IHubContext<ChatHub>>();
             var mobilePush = scope.ServiceProvider.GetServices<IMobilePushNotificationService>().FirstOrDefault();
+            var notifications = scope.ServiceProvider.GetRequiredService<INotificationDispatcher>();
             var llm = scope.ServiceProvider.GetService<ILlmProvider>();
 
             await EnsureTablesAsync(db, ct);
@@ -95,10 +97,8 @@ namespace Mahima.Api.v3.clean.Services
 
             var messages = await db.Messages
                 .AsNoTracking()
-<<<<<<< HEAD
-=======
                 .Include(m => m.Sender)
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
+                .Include(m => m.Chat)
                 .Where(m => pendingIds.Contains(m.Id))
                 .OrderBy(m => m.CreatedAt)
                 .ToListAsync(ct);
@@ -141,6 +141,8 @@ namespace Mahima.Api.v3.clean.Services
                         if (alert.PastorFollowupSent)
                             await MarkPastorFollowupSentAsync(db, message.Id, ct);
                     }
+
+                    await EscalateToAdminsAsync(notifications, message.Chat?.TenantId, alert, ct);
                 }
 
                 await InsertScanAsync(db, message.Id, _aiEnabled && llm?.IsConfigured == true ? "rules+ai" : "rules", ct);
@@ -558,6 +560,39 @@ message: {text ?? string.Empty}";
         }
 
         private static bool ShouldSendPastorFollowup(ChatSafetyAlert alert) => true;
+
+        private async Task EscalateToAdminsAsync(INotificationDispatcher notifications, Guid? tenantId, ChatSafetyAlert alert, CancellationToken ct)
+        {
+            try
+            {
+                var effectiveTenantId = tenantId ?? RootTenantId;
+                var message = $"A flagged chat message needs review: {alert.Summary} " +
+                              $"(category: {alert.Category}, severity: {alert.Severity}).";
+
+                await notifications.EnqueueAsync(new NotificationRequest(
+                    TenantId: effectiveTenantId,
+                    Kind: "chat-safety-alert",
+                    Subject: "Mahima chat safety alert",
+                    Message: message,
+                    TargetGroup: "tenant-admins",
+                    DedupeKey: $"chat-safety:{alert.MessageId}"), ct);
+
+                if (IsSecurityEscalation(alert.Category, alert.Severity, alert.AlertLevel))
+                {
+                    await notifications.EnqueueAsync(new NotificationRequest(
+                        TenantId: effectiveTenantId,
+                        Kind: "chat-safety-alert-severe",
+                        Subject: "Mahima chat safety alert (severe)",
+                        Message: message,
+                        TargetGroup: "root-admins",
+                        DedupeKey: $"chat-safety-severe:{alert.MessageId}"), ct);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not escalate chat safety alert for message {MessageId}.", alert.MessageId);
+            }
+        }
 
         private static bool IsMedia(string? contentType, string? url)
         {

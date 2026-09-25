@@ -1,4 +1,4 @@
-// Controllers/TimesheetsController.cs
+﻿// Controllers/TimesheetsController.cs
 using System;
 using Mahima.Api.v3.clean.Data;
 using System.Linq;
@@ -40,21 +40,17 @@ namespace Mahima.Api.Controllers
 
         private string? GetActorIdString() => GetActorId()?.ToString();
 
-<<<<<<< HEAD
-        private bool HasAnyRole(params string[] roles)
-=======
         private Guid GetCurrentTenantId() =>
             Guid.TryParse(User.FindFirstValue("tenant_id"), out var id)
                 ? id
                 : RootTenantId;
 
-        private bool IsAdmin()
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
+        private bool HasAnyRole(params string[] roles)
         {
             var allowed = roles
                 .Select(r => r.Trim().ToLowerInvariant())
                 .Where(r => !string.IsNullOrWhiteSpace(r))
-                .ToHashSet();
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             if (allowed.Count == 0)
                 return false;
@@ -69,6 +65,8 @@ namespace Mahima.Api.Controllers
 
             return roleClaims.Any(role => allowed.Contains(role!));
         }
+
+        private bool IsAdmin() => HasAnyRole("admin", "administrator");
 
         private bool CanManageOthers() => HasAnyRole("admin", "administrator", "finance");
 
@@ -158,18 +156,7 @@ namespace Mahima.Api.Controllers
             if (string.IsNullOrWhiteSpace(model.UserId))
                 return BadRequest("UserId is required.");
 
-<<<<<<< HEAD
-            if (!canManageOthers)
-            {
-                if (string.IsNullOrWhiteSpace(actorId))
-                    return Forbid();
-                if (!IsActor(model.UserId))
-                    return Forbid();
-            }
-
-=======
             model.TenantId = GetCurrentTenantId();
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
             model.Date = DateTime.SpecifyKind(model.Date, DateTimeKind.Unspecified);
 
             _db.Timesheets.Add(model);

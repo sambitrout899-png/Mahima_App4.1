@@ -481,14 +481,14 @@ LIMIT 1;";
 
             await rdr.CloseAsync();
 
-<<<<<<< HEAD
+            await using var tenantCountryCmd = new NpgsqlCommand("SELECT country_code FROM public.tenants WHERE id = @tenant_id LIMIT 1", conn);
+            tenantCountryCmd.Parameters.AddWithValue("tenant_id", NpgsqlTypes.NpgsqlDbType.Uuid, tenantGuid);
+            var tenantCountryCode = (await tenantCountryCmd.ExecuteScalarAsync())?.ToString() ?? "IN";
+
             var roles = await LoadEffectiveRoles(conn, userId, role);
-            var pages = await LoadPermissions(conn, roles);
+            var pages = await LoadPermissions(conn, roles, tenantGuid);
             await Mahima.Api.v3.clean.Controllers.PositionsController.EnsureDefaultMemberPositionForUserAsync(conn, userId);
             var positions = await Mahima.Api.v3.clean.Controllers.PositionsController.LoadUserPositionsAsync(conn, userId);
-=======
-            var pages = await LoadPermissions(conn, role, tenantGuid);
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 
             return Ok(new
             {
@@ -499,6 +499,7 @@ LIMIT 1;";
                 email,
                 phone,
                 tenantId,
+                tenantCountryCode,
                 role,
                 roles,
                 pages,
@@ -653,16 +654,11 @@ RETURNING id;";
 
             var id = await insertCmd.ExecuteScalarAsync();
             var userId = Guid.Parse(id?.ToString() ?? Guid.Empty.ToString());
-<<<<<<< HEAD
             var roles = new List<string> { memberRoleName };
-            var pages = await LoadPermissions(conn, roles);
+            var pages = await LoadPermissions(conn, roles, tenantId);
             await Mahima.Api.v3.clean.Controllers.PositionsController.EnsureDefaultMemberPositionForUserAsync(conn, userId);
             var positions = await Mahima.Api.v3.clean.Controllers.PositionsController.LoadUserPositionsAsync(conn, userId);
-            var token = _jwtService.GenerateToken(userId, username, string.IsNullOrWhiteSpace(display) ? username : display, memberRoleName);
-=======
-            var pages = await LoadPermissions(conn, memberRoleName, tenantId);
             var token = _jwtService.GenerateToken(userId, username, string.IsNullOrWhiteSpace(display) ? username : display, memberRoleName, tenantId);
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
             await SendNewUserWelcomeAsync(userId, string.IsNullOrWhiteSpace(display) ? username : display);
 
             return Ok(new
@@ -750,12 +746,21 @@ public async Task<IActionResult> GoogleLogin([FromBody] GoogleLoginDto dto)
         await using var conn = new NpgsqlConnection(_connStr);
         await conn.OpenAsync();
         await EnsureAuthSecurityTablesAsync(conn);
+        var tenant = await _tenantContext.GetCurrentTenantAsync(HttpContext.RequestAborted);
+        var tenantId = tenant?.Id ?? Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var configuredRootUsername = _config["RootAdmin:Username"]?.Trim();
+        var configuredRootGoogleEmail = _config["RootAdmin:GoogleEmail"]?.Trim().ToLowerInvariant();
+        var useConfiguredRoot =
+            tenant?.IsRootTenant == true &&
+            !string.IsNullOrWhiteSpace(configuredRootUsername) &&
+            !string.IsNullOrWhiteSpace(configuredRootGoogleEmail) &&
+            string.Equals(email, configuredRootGoogleEmail, StringComparison.OrdinalIgnoreCase);
 
-        Guid userGuid;
-        string username;
-        string? phone;
-        string role;
-        object id;
+        Guid userGuid = Guid.Empty;
+        string username = "";
+        string? phone = null;
+        string role = "";
+        object id = Guid.Empty;
 
         await using (var findCmd = new NpgsqlCommand(@"
 SELECT
@@ -767,10 +772,17 @@ SELECT
   r.name as role
 FROM users u
 JOIN roles r ON r.id = u.role::int
-WHERE LOWER(TRIM(u.email)) = @email
+WHERE (
+    (@use_configured_root = TRUE AND LOWER(TRIM(u.username)) = @root_username)
+ OR (@use_configured_root = FALSE AND LOWER(TRIM(u.email)) = @email)
+)
+  AND u.tenant_id = @tenant_id
 LIMIT 1;", conn))
         {
             findCmd.Parameters.AddWithValue("email", NpgsqlTypes.NpgsqlDbType.Text, email);
+            findCmd.Parameters.AddWithValue("use_configured_root", NpgsqlTypes.NpgsqlDbType.Boolean, useConfiguredRoot);
+            findCmd.Parameters.AddWithValue("root_username", NpgsqlTypes.NpgsqlDbType.Text, (configuredRootUsername ?? "").ToLowerInvariant());
+            findCmd.Parameters.AddWithValue("tenant_id", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
             await using var rdr = await findCmd.ExecuteReaderAsync();
             if (await rdr.ReadAsync())
             {
@@ -781,6 +793,25 @@ LIMIT 1;", conn))
                 phone = rdr["phone"]?.ToString();
                 role = rdr["role"]?.ToString() ?? "Member";
                 await rdr.CloseAsync();
+
+                if (useConfiguredRoot)
+                {
+                    await using var linkCmd = new NpgsqlCommand(@"
+UPDATE users
+SET email = NULL
+WHERE id <> @id
+  AND tenant_id = @tenant_id
+  AND LOWER(TRIM(COALESCE(email, ''))) = @email;
+
+UPDATE users
+SET email = @email
+WHERE id = @id AND tenant_id = @tenant_id;", conn);
+                    linkCmd.Parameters.AddWithValue("email", NpgsqlTypes.NpgsqlDbType.Text, email);
+                    linkCmd.Parameters.AddWithValue("id", NpgsqlTypes.NpgsqlDbType.Uuid, userGuid);
+                    linkCmd.Parameters.AddWithValue("tenant_id", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
+                    await linkCmd.ExecuteNonQueryAsync();
+                    _logger.LogInformation("Linked configured Google identity to root account {Username}.", username);
+                }
 
                 var blockReason = await GetActiveUserBlockReasonAsync(conn, userGuid);
                 if (!string.IsNullOrWhiteSpace(blockReason))
@@ -793,94 +824,156 @@ LIMIT 1;", conn))
             {
                 await rdr.CloseAsync();
 
-                var memberRoleId = 2;
-                var memberRoleName = "Member";
-                await using (var roleCmd = new NpgsqlCommand(@"
+                var linkedConfiguredRoot = false;
+
+                if (tenant?.IsRootTenant == true &&
+                    !string.IsNullOrWhiteSpace(configuredRootUsername) &&
+                    !string.IsNullOrWhiteSpace(configuredRootGoogleEmail) &&
+                    string.Equals(email, configuredRootGoogleEmail, StringComparison.OrdinalIgnoreCase))
+                {
+                    await using var rootCmd = new NpgsqlCommand(@"
+SELECT
+  u.id,
+  u.username,
+  u.displayname,
+  u.phone,
+  r.name AS role
+FROM users u
+JOIN roles r ON r.id = u.role::int
+WHERE LOWER(TRIM(u.username)) = @username
+  AND u.tenant_id = @tenant_id
+LIMIT 1;", conn);
+                    rootCmd.Parameters.AddWithValue("username", NpgsqlTypes.NpgsqlDbType.Text, configuredRootUsername.ToLowerInvariant());
+                    rootCmd.Parameters.AddWithValue("tenant_id", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
+
+                    await using var rootRdr = await rootCmd.ExecuteReaderAsync();
+                    if (await rootRdr.ReadAsync())
+                    {
+                        id = rootRdr["id"];
+                        userGuid = Guid.Parse(id.ToString() ?? Guid.Empty.ToString());
+                        username = rootRdr["username"]?.ToString() ?? configuredRootUsername;
+                        display = rootRdr["displayname"]?.ToString() ?? display;
+                        phone = rootRdr["phone"]?.ToString();
+                        role = rootRdr["role"]?.ToString() ?? "Admin";
+                        linkedConfiguredRoot = true;
+                    }
+                    await rootRdr.CloseAsync();
+
+                    if (linkedConfiguredRoot)
+                    {
+                        var profilePhotoColumn = await GetUserColumnAsync(conn, "profilephotourl", "ProfilePhotoUrl");
+                        var profileUpdate = string.IsNullOrWhiteSpace(profilePhotoColumn)
+                            ? ""
+                            : $", {QuoteIdentifier(profilePhotoColumn)} = COALESCE(NULLIF({QuoteIdentifier(profilePhotoColumn)}, ''), @profilephotourl)";
+                        await using var linkCmd = new NpgsqlCommand($@"
+UPDATE users
+SET email = @email{profileUpdate}
+WHERE id = @id AND tenant_id = @tenant_id;", conn);
+                        linkCmd.Parameters.AddWithValue("email", NpgsqlTypes.NpgsqlDbType.Text, email);
+                        linkCmd.Parameters.AddWithValue("id", NpgsqlTypes.NpgsqlDbType.Uuid, userGuid);
+                        linkCmd.Parameters.AddWithValue("tenant_id", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
+                        if (!string.IsNullOrWhiteSpace(profilePhotoColumn))
+                            linkCmd.Parameters.AddWithValue("profilephotourl", NpgsqlTypes.NpgsqlDbType.Text, (object?)payload.Picture ?? DBNull.Value);
+                        await linkCmd.ExecuteNonQueryAsync();
+                        _logger.LogInformation("Linked configured Google identity to root account {Username}.", username);
+                    }
+                }
+
+                if (!linkedConfiguredRoot)
+                {
+                    var memberRoleId = 2;
+                    var memberRoleName = "Member";
+                    await using (var roleCmd = new NpgsqlCommand(@"
 SELECT id, name
 FROM roles
 WHERE LOWER(name) = 'member'
 LIMIT 1;", conn))
-                await using (var roleRdr = await roleCmd.ExecuteReaderAsync())
-                {
-                    if (await roleRdr.ReadAsync())
+                    await using (var roleRdr = await roleCmd.ExecuteReaderAsync())
                     {
-                        memberRoleId = Convert.ToInt32(roleRdr["id"]);
-                        memberRoleName = roleRdr["name"]?.ToString() ?? "Member";
+                        if (await roleRdr.ReadAsync())
+                        {
+                            memberRoleId = Convert.ToInt32(roleRdr["id"]);
+                            memberRoleName = roleRdr["name"]?.ToString() ?? "Member";
+                        }
                     }
-                }
 
-                var baseUsername = SanitizeGoogleUsername(email.Split('@')[0]);
-                username = await GenerateUniqueGoogleUsernameAsync(conn, baseUsername);
-                phone = null;
-                role = memberRoleName;
+                    var baseUsername = SanitizeGoogleUsername(email.Split('@')[0]);
+                    username = await GenerateUniqueGoogleUsernameAsync(conn, baseUsername);
+                    phone = null;
+                    role = memberRoleName;
 
-                var passwordHash = _pwHasher.HashPassword(null, $"GOOGLE:{payload.Subject}:{Guid.NewGuid():N}");
-                var insertColumns = new List<string>
-                {
-                    QuoteIdentifier("username"),
-                    QuoteIdentifier("email"),
-                    QuoteIdentifier("passwordhash"),
-                    QuoteIdentifier("role"),
-                    QuoteIdentifier("joindate"),
-                    QuoteIdentifier("phone"),
-                    QuoteIdentifier("displayname"),
-                };
-                var insertValues = new List<string>
-                {
-                    "@username",
-                    "@email",
-                    "@passwordhash",
-                    "@role",
-                    "NOW()",
-                    "NULL",
-                    "@displayname",
-                };
+                    var passwordHash = _pwHasher.HashPassword(null, $"GOOGLE:{payload.Subject}:{Guid.NewGuid():N}");
+                    var insertColumns = new List<string>
+                    {
+                        QuoteIdentifier("username"),
+                        QuoteIdentifier("email"),
+                        QuoteIdentifier("passwordhash"),
+                        QuoteIdentifier("role"),
+                        QuoteIdentifier("tenant_id"),
+                        QuoteIdentifier("joindate"),
+                        QuoteIdentifier("phone"),
+                        QuoteIdentifier("displayname"),
+                    };
+                    var insertValues = new List<string>
+                    {
+                        "@username",
+                        "@email",
+                        "@passwordhash",
+                        "@role",
+                        "@tenant_id",
+                        "NOW()",
+                        "NULL",
+                        "@displayname",
+                    };
 
-                var userCodeColumn = await GetUserColumnAsync(conn, "UserCode", "usercode");
-                var profilePhotoColumn = await GetUserColumnAsync(conn, "profilephotourl", "ProfilePhotoUrl");
+                    var userCodeColumn = await GetUserColumnAsync(conn, "UserCode", "usercode");
+                    var profilePhotoColumn = await GetUserColumnAsync(conn, "profilephotourl", "ProfilePhotoUrl");
 
-                if (!string.IsNullOrWhiteSpace(userCodeColumn))
-                {
-                    insertColumns.Insert(0, QuoteIdentifier(userCodeColumn));
-                    insertValues.Insert(0, "@usercode");
-                }
+                    if (!string.IsNullOrWhiteSpace(userCodeColumn))
+                    {
+                        insertColumns.Insert(0, QuoteIdentifier(userCodeColumn));
+                        insertValues.Insert(0, "@usercode");
+                    }
 
-                if (!string.IsNullOrWhiteSpace(profilePhotoColumn))
-                {
-                    insertColumns.Add(QuoteIdentifier(profilePhotoColumn));
-                    insertValues.Add("@profilephotourl");
-                }
+                    if (!string.IsNullOrWhiteSpace(profilePhotoColumn))
+                    {
+                        insertColumns.Add(QuoteIdentifier(profilePhotoColumn));
+                        insertValues.Add("@profilephotourl");
+                    }
 
-                var insertSql = $@"
+                    var insertSql = $@"
 INSERT INTO public.users ({string.Join(", ", insertColumns)})
 VALUES ({string.Join(", ", insertValues)})
 RETURNING id;";
 
-                await using var insertCmd = new NpgsqlCommand(insertSql, conn);
-                if (!string.IsNullOrWhiteSpace(userCodeColumn))
-                {
-                    var generatedCode = await GenerateUserCodeAsync(conn, userCodeColumn);
-                    insertCmd.Parameters.AddWithValue("usercode", NpgsqlTypes.NpgsqlDbType.Text, generatedCode);
-                }
-                insertCmd.Parameters.AddWithValue("username", NpgsqlTypes.NpgsqlDbType.Text, username);
-                insertCmd.Parameters.AddWithValue("email", NpgsqlTypes.NpgsqlDbType.Text, email);
-                insertCmd.Parameters.AddWithValue("passwordhash", NpgsqlTypes.NpgsqlDbType.Text, passwordHash);
-                insertCmd.Parameters.AddWithValue("role", NpgsqlTypes.NpgsqlDbType.Text, memberRoleId.ToString());
-                insertCmd.Parameters.AddWithValue("displayname", NpgsqlTypes.NpgsqlDbType.Text, display);
-                if (!string.IsNullOrWhiteSpace(profilePhotoColumn))
-                    insertCmd.Parameters.AddWithValue("profilephotourl", NpgsqlTypes.NpgsqlDbType.Text, (object?)payload.Picture ?? DBNull.Value);
+                    await using var insertCmd = new NpgsqlCommand(insertSql, conn);
+                    if (!string.IsNullOrWhiteSpace(userCodeColumn))
+                    {
+                        var prefix = await ReadTenantUserCodePrefixAsync(conn, tenantId);
+                        var generatedCode = await GenerateUserCodeAsync(conn, userCodeColumn, prefix);
+                        insertCmd.Parameters.AddWithValue("usercode", NpgsqlTypes.NpgsqlDbType.Text, generatedCode);
+                    }
+                    insertCmd.Parameters.AddWithValue("username", NpgsqlTypes.NpgsqlDbType.Text, username);
+                    insertCmd.Parameters.AddWithValue("email", NpgsqlTypes.NpgsqlDbType.Text, email);
+                    insertCmd.Parameters.AddWithValue("passwordhash", NpgsqlTypes.NpgsqlDbType.Text, passwordHash);
+                    insertCmd.Parameters.AddWithValue("role", NpgsqlTypes.NpgsqlDbType.Text, memberRoleId.ToString());
+                    insertCmd.Parameters.AddWithValue("tenant_id", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
+                    insertCmd.Parameters.AddWithValue("displayname", NpgsqlTypes.NpgsqlDbType.Text, display);
+                    if (!string.IsNullOrWhiteSpace(profilePhotoColumn))
+                        insertCmd.Parameters.AddWithValue("profilephotourl", NpgsqlTypes.NpgsqlDbType.Text, (object?)payload.Picture ?? DBNull.Value);
 
-                id = await insertCmd.ExecuteScalarAsync() ?? Guid.Empty;
-                userGuid = Guid.Parse(id.ToString() ?? Guid.Empty.ToString());
-                await SendNewUserWelcomeAsync(userGuid, display);
+                    id = await insertCmd.ExecuteScalarAsync() ?? Guid.Empty;
+                    userGuid = Guid.Parse(id.ToString() ?? Guid.Empty.ToString());
+                    await SendNewUserWelcomeAsync(userGuid, display);
+                }
             }
         }
 
         var roles = await LoadEffectiveRoles(conn, userGuid, role);
-        var pages = await LoadPermissions(conn, roles);
+        var pages = await LoadPermissions(conn, roles, tenantId);
         await Mahima.Api.v3.clean.Controllers.PositionsController.EnsureDefaultMemberPositionForUserAsync(conn, userGuid);
         var positions = await Mahima.Api.v3.clean.Controllers.PositionsController.LoadUserPositionsAsync(conn, userGuid);
-        var token = _jwtService.GenerateToken(userGuid, username, display, role);
+        var token = _jwtService.GenerateToken(userGuid, username, display, role, tenantId);
 
         await RecordSecurityEventAsync(conn, "GoogleLogin", "low", username, userGuid, email);
 
@@ -935,7 +1028,7 @@ public async Task<IActionResult> Login([FromBody] LoginDto dto)
         await EnsureAuthSecurityTablesAsync(conn);
 
        var sql = @"
-SELECT 
+SELECT
   u.id,
   u.username,
   u.displayname,
@@ -943,7 +1036,9 @@ SELECT
   u.phone,
   u.tenant_id,
   r.name as role,
-  u.passwordhash
+  u.passwordhash,
+  u.mfa_enabled,
+  u.mfa_secret
 FROM users u
 JOIN roles r ON r.id = u.role::int
 WHERE (LOWER(TRIM(u.username)) = @u
@@ -976,6 +1071,8 @@ LIMIT 1;
         var tenantId = rdr["tenant_id"] == DBNull.Value ? (Guid?)null : Guid.Parse(rdr["tenant_id"].ToString()!);
         var role = rdr["role"]?.ToString() ?? "";
         var storedHash = rdr["passwordhash"]?.ToString();
+        var mfaEnabled = rdr["mfa_enabled"] != DBNull.Value && (bool)rdr["mfa_enabled"];
+        var mfaSecret = rdr["mfa_secret"] as string;
 
         if (string.IsNullOrWhiteSpace(dto.Password))
             return Unauthorized(new { message = "Password required" });
@@ -1008,16 +1105,22 @@ LIMIT 1;
             return StatusCode(423, new { message = "Your access is blocked. Please contact Mahima Ministry admin.", reason = blockReason });
         }
 
-<<<<<<< HEAD
-	var token = _jwtService.GenerateToken(userGuid, username, display, role);
+        if (mfaEnabled && !string.IsNullOrWhiteSpace(mfaSecret))
+        {
+            var challengeId = MfaChallengeStore.Create(userGuid);
+            return Ok(new
+            {
+                mfaRequired = true,
+                challengeId,
+                message = "Enter the 6-digit code from your authenticator app to finish signing in."
+            });
+        }
+
+	var token = _jwtService.GenerateToken(userGuid, username, display, role, tenantId);
         var roles = await LoadEffectiveRoles(conn, userGuid, role);
-        var pages = await LoadPermissions(conn, roles);
+        var pages = await LoadPermissions(conn, roles, tenantId ?? Guid.Parse("00000000-0000-0000-0000-000000000001"));
         await Mahima.Api.v3.clean.Controllers.PositionsController.EnsureDefaultMemberPositionForUserAsync(conn, userGuid);
         var positions = await Mahima.Api.v3.clean.Controllers.PositionsController.LoadUserPositionsAsync(conn, userGuid);
-=======
-	var token = _jwtService.GenerateToken(userGuid, username, display, role, tenantId);
-        var pages = await LoadPermissions(conn, role, tenantId ?? Guid.Parse("00000000-0000-0000-0000-000000000001"));
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 
         return Ok(new
         {
@@ -1051,9 +1154,253 @@ LIMIT 1;
 }
 
     // ============================
+    // MULTI-FACTOR AUTHENTICATION (TOTP)
+    // ============================
+
+    /// <summary>In-memory store for short-lived post-password MFA challenges issued by Login().</summary>
+    private static class MfaChallengeStore
+    {
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, (Guid UserId, DateTime ExpiresAtUtc)> _challenges = new();
+        private static readonly TimeSpan Ttl = TimeSpan.FromMinutes(5);
+
+        public static Guid Create(Guid userId)
+        {
+            Cleanup();
+            var challengeId = Guid.NewGuid();
+            _challenges[challengeId] = (userId, DateTime.UtcNow.Add(Ttl));
+            return challengeId;
+        }
+
+        public static bool TryConsume(Guid challengeId, out Guid userId)
+        {
+            userId = Guid.Empty;
+            if (!_challenges.TryRemove(challengeId, out var entry)) return false;
+            if (entry.ExpiresAtUtc < DateTime.UtcNow) return false;
+            userId = entry.UserId;
+            return true;
+        }
+
+        private static void Cleanup()
+        {
+            var now = DateTime.UtcNow;
+            foreach (var kvp in _challenges)
+                if (kvp.Value.ExpiresAtUtc < now) _challenges.TryRemove(kvp.Key, out _);
+        }
+    }
+
+    public class MfaLoginVerifyDto
+    {
+        public Guid ChallengeId { get; set; }
+        public string Code { get; set; } = "";
+    }
+
+    public class MfaVerifySetupDto
+    {
+        public string Code { get; set; } = "";
+    }
+
+    public class MfaDisableDto
+    {
+        public string Password { get; set; } = "";
+    }
+
+    // Second step of login when the account has MFA enabled: exchange the challenge + a
+    // 6-digit authenticator code (or a one-time recovery code) for the real session token.
+    [HttpPost("mfa/login-verify")]
+    public async Task<IActionResult> MfaLoginVerify([FromBody] MfaLoginVerifyDto dto)
+    {
+        if (dto == null || dto.ChallengeId == Guid.Empty || string.IsNullOrWhiteSpace(dto.Code))
+            return BadRequest(new { message = "Challenge id and code are required." });
+
+        if (!MfaChallengeStore.TryConsume(dto.ChallengeId, out var userGuid))
+            return Unauthorized(new { message = "This sign-in attempt has expired. Please log in again." });
+
+        using var conn = new NpgsqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        var sql = @"
+SELECT u.id, u.username, u.displayname, u.email, u.phone, u.tenant_id, r.name as role,
+       u.mfa_secret, u.mfa_recovery_codes
+FROM users u
+JOIN roles r ON r.id = u.role::int
+WHERE u.id = @id
+LIMIT 1;";
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.Add("id", NpgsqlTypes.NpgsqlDbType.Uuid).Value = userGuid;
+        await using var rdr = await cmd.ExecuteReaderAsync();
+        if (!await rdr.ReadAsync()) return Unauthorized(new { message = "User not found." });
+
+        var id = rdr["id"];
+        var username = rdr["username"]?.ToString();
+        var display = rdr["displayname"]?.ToString();
+        var email = rdr["email"]?.ToString();
+        var phone = rdr["phone"]?.ToString();
+        var tenantId = rdr["tenant_id"] == DBNull.Value ? (Guid?)null : Guid.Parse(rdr["tenant_id"].ToString()!);
+        var role = rdr["role"]?.ToString() ?? "";
+        var mfaSecret = rdr["mfa_secret"] as string;
+        var recoveryCodesRaw = rdr["mfa_recovery_codes"] as string;
+        await rdr.CloseAsync();
+
+        var code = dto.Code.Trim();
+        var validTotp = TotpHelper.VerifyCode(mfaSecret ?? "", code);
+        var recoveryCodes = (recoveryCodesRaw ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        var usedRecoveryCode = recoveryCodes.FirstOrDefault(c => string.Equals(c, code, StringComparison.OrdinalIgnoreCase));
+
+        if (!validTotp && usedRecoveryCode == null)
+        {
+            await RecordSecurityEventAsync(conn, "MfaFailed", "high", username, userGuid, "Invalid authenticator code.");
+            return Unauthorized(new { message = "Invalid or expired code." });
+        }
+
+        if (usedRecoveryCode != null)
+        {
+            recoveryCodes.Remove(usedRecoveryCode);
+            await using var updateCmd = new NpgsqlCommand("UPDATE users SET mfa_recovery_codes = @codes WHERE id = @id", conn);
+            updateCmd.Parameters.AddWithValue("codes", NpgsqlTypes.NpgsqlDbType.Text, string.Join(",", recoveryCodes));
+            updateCmd.Parameters.Add("id", NpgsqlTypes.NpgsqlDbType.Uuid).Value = userGuid;
+            await updateCmd.ExecuteNonQueryAsync();
+        }
+
+        var token = _jwtService.GenerateToken(userGuid, username, display, role, tenantId);
+        var roles = await LoadEffectiveRoles(conn, userGuid, role);
+        var pages = await LoadPermissions(conn, roles, tenantId ?? Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        await Mahima.Api.v3.clean.Controllers.PositionsController.EnsureDefaultMemberPositionForUserAsync(conn, userGuid);
+        var positions = await Mahima.Api.v3.clean.Controllers.PositionsController.LoadUserPositionsAsync(conn, userGuid);
+
+        return Ok(new
+        {
+            token,
+            user = new
+            {
+                id, username, display, email, phone, tenantId, role, roles, pages, positions,
+                primaryPosition = positions.FirstOrDefault()
+            }
+        });
+    }
+
+    [Authorize]
+    [HttpGet("mfa/status")]
+    public async Task<IActionResult> MfaStatus()
+    {
+        var userId = CurrentAuthUserId();
+        if (userId == null) return Unauthorized();
+
+        using var conn = new NpgsqlConnection(_connStr);
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand("SELECT mfa_enabled FROM users WHERE id = @id", conn);
+        cmd.Parameters.Add("id", NpgsqlTypes.NpgsqlDbType.Uuid).Value = userId.Value;
+        var enabled = (bool?)(await cmd.ExecuteScalarAsync()) ?? false;
+        return Ok(new { enabled });
+    }
+
+    // Step 1 of enabling MFA: generate a pending secret and return the otpauth:// URI for the
+    // user's authenticator app. Nothing is enforced until verify-setup succeeds.
+    [Authorize]
+    [HttpPost("mfa/setup")]
+    public async Task<IActionResult> MfaSetup()
+    {
+        var userId = CurrentAuthUserId();
+        if (userId == null) return Unauthorized();
+
+        using var conn = new NpgsqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        await using var userCmd = new NpgsqlCommand("SELECT username, email FROM users WHERE id = @id", conn);
+        userCmd.Parameters.Add("id", NpgsqlTypes.NpgsqlDbType.Uuid).Value = userId.Value;
+        await using var rdr = await userCmd.ExecuteReaderAsync();
+        if (!await rdr.ReadAsync()) return Unauthorized();
+        var accountLabel = (rdr["email"] as string) ?? (rdr["username"] as string) ?? "user";
+        await rdr.CloseAsync();
+
+        var secret = TotpHelper.GenerateSecret();
+        await using var updateCmd = new NpgsqlCommand("UPDATE users SET mfa_pending_secret = @secret WHERE id = @id", conn);
+        updateCmd.Parameters.AddWithValue("secret", NpgsqlTypes.NpgsqlDbType.Text, secret);
+        updateCmd.Parameters.Add("id", NpgsqlTypes.NpgsqlDbType.Uuid).Value = userId.Value;
+        await updateCmd.ExecuteNonQueryAsync();
+
+        var otpauthUri = TotpHelper.BuildOtpAuthUri(secret, accountLabel, "Mahima");
+        return Ok(new { secret, otpauthUri });
+    }
+
+    // Step 2: confirm the user's authenticator app produces valid codes, then turn MFA on
+    // and hand back one-time recovery codes (shown to the user exactly once).
+    [Authorize]
+    [HttpPost("mfa/verify-setup")]
+    public async Task<IActionResult> MfaVerifySetup([FromBody] MfaVerifySetupDto dto)
+    {
+        var userId = CurrentAuthUserId();
+        if (userId == null) return Unauthorized();
+        if (dto == null || string.IsNullOrWhiteSpace(dto.Code)) return BadRequest(new { message = "Code is required." });
+
+        using var conn = new NpgsqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        await using var cmd = new NpgsqlCommand("SELECT mfa_pending_secret FROM users WHERE id = @id", conn);
+        cmd.Parameters.Add("id", NpgsqlTypes.NpgsqlDbType.Uuid).Value = userId.Value;
+        var pendingSecret = (await cmd.ExecuteScalarAsync()) as string;
+        if (string.IsNullOrWhiteSpace(pendingSecret))
+            return BadRequest(new { message = "Start MFA setup first." });
+
+        if (!TotpHelper.VerifyCode(pendingSecret, dto.Code.Trim()))
+            return BadRequest(new { message = "That code did not match. Check the time on your device and try again." });
+
+        var recoveryCodes = Enumerable.Range(0, 8).Select(_ => TotpHelper.GenerateRecoveryCode()).ToList();
+
+        await using var updateCmd = new NpgsqlCommand(@"
+UPDATE users SET
+  mfa_enabled = true,
+  mfa_secret = @secret,
+  mfa_pending_secret = NULL,
+  mfa_recovery_codes = @codes,
+  mfa_enabled_at_utc = now()
+WHERE id = @id", conn);
+        updateCmd.Parameters.AddWithValue("secret", NpgsqlTypes.NpgsqlDbType.Text, pendingSecret);
+        updateCmd.Parameters.AddWithValue("codes", NpgsqlTypes.NpgsqlDbType.Text, string.Join(",", recoveryCodes));
+        updateCmd.Parameters.Add("id", NpgsqlTypes.NpgsqlDbType.Uuid).Value = userId.Value;
+        await updateCmd.ExecuteNonQueryAsync();
+
+        return Ok(new { enabled = true, recoveryCodes });
+    }
+
+    [Authorize]
+    [HttpPost("mfa/disable")]
+    public async Task<IActionResult> MfaDisable([FromBody] MfaDisableDto dto)
+    {
+        var userId = CurrentAuthUserId();
+        if (userId == null) return Unauthorized();
+        if (dto == null || string.IsNullOrWhiteSpace(dto.Password))
+            return BadRequest(new { message = "Confirm your password to disable MFA." });
+
+        using var conn = new NpgsqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        await using var cmd = new NpgsqlCommand("SELECT passwordhash FROM users WHERE id = @id", conn);
+        cmd.Parameters.Add("id", NpgsqlTypes.NpgsqlDbType.Uuid).Value = userId.Value;
+        var storedHash = (await cmd.ExecuteScalarAsync()) as string;
+        if (string.IsNullOrWhiteSpace(storedHash)) return Unauthorized();
+
+        var result = _pwHasher.VerifyHashedPassword(null, storedHash, dto.Password);
+        if (result != PasswordVerificationResult.Success && result != PasswordVerificationResult.SuccessRehashNeeded)
+            return Unauthorized(new { message = "Incorrect password." });
+
+        await using var updateCmd = new NpgsqlCommand(@"
+UPDATE users SET mfa_enabled = false, mfa_secret = NULL, mfa_pending_secret = NULL, mfa_recovery_codes = NULL
+WHERE id = @id", conn);
+        updateCmd.Parameters.Add("id", NpgsqlTypes.NpgsqlDbType.Uuid).Value = userId.Value;
+        await updateCmd.ExecuteNonQueryAsync();
+
+        return Ok(new { enabled = false });
+    }
+
+    private Guid? CurrentAuthUserId()
+    {
+        var raw = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub") ?? User.FindFirstValue("nameid");
+        return Guid.TryParse(raw, out var id) ? id : null;
+    }
+
+    // ============================
     // ?? PERMISSION LOADER
     // ============================
-<<<<<<< HEAD
     private async Task<List<string>> LoadEffectiveRoles(NpgsqlConnection conn, Guid userId, string? fallbackRole)
     {
         var roles = new List<string>();
@@ -1092,10 +1439,7 @@ CREATE INDEX IF NOT EXISTS ix_user_roles_user ON public.user_roles(user_id);", c
         await cmd.ExecuteNonQueryAsync();
     }
 
-    private async Task<List<string>> LoadPermissions(NpgsqlConnection conn, IEnumerable<string?> roles)
-=======
     private static readonly Dictionary<string, string> PageModules = new(StringComparer.OrdinalIgnoreCase)
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
     {
         ["CHAT"] = "chat",
         ["TASKS"] = "operations",
@@ -1104,16 +1448,22 @@ CREATE INDEX IF NOT EXISTS ix_user_roles_user ON public.user_roles(user_id);", c
         ["COSTS"] = "operations",
         ["REPORTS"] = "operations",
         ["AUDIT_TRAIL"] = "operations",
+        ["VOLUNTEERS"] = "operations",
         ["PASTOR"] = "care_ministry",
         ["README"] = "care_ministry",
         ["MARRIAGE"] = "care_ministry",
         ["BAPTISM"] = "care_ministry",
         ["COUNSELLING"] = "care_ministry",
+        ["EVENTS"] = "care_ministry",
+        ["CHECKIN"] = "care_ministry",
+        ["SERVICE_PLANS"] = "care_ministry",
         ["ADMIN_DASHBOARD"] = "admin_tools",
         ["LIVE_USERS"] = "admin_tools",
         ["MULTITENANT"] = "admin_tools",
+        ["TENANT_DASHBOARD"] = "admin_tools",
+        ["SAAS_BILLING"] = "admin_tools",
         ["LANGUAGES"] = "admin_tools",
-        ["APP_DOWNLOADS"] = "communications",
+        ["APP_DOWNLOADS"] = "base",
         ["MESSAGE_CENTER"] = "communications",
         ["EMAIL_CLIENT"] = "communications",
         ["GOOGLE_DRIVE"] = "communications",
@@ -1122,7 +1472,7 @@ CREATE INDEX IF NOT EXISTS ix_user_roles_user ON public.user_roles(user_id);", c
 
     private static readonly string[] BasePageKeys =
     {
-        "DASHBOARD", "SUBSCRIPTIONS", "LANDING_PAGE", "USERS", "PRAYER_REQUESTS", "SERMONS", "TEAMS", "ROLES", "PAGES"
+        "DASHBOARD", "SUBSCRIPTIONS", "LANDING_PAGE", "USERS", "PRAYER_REQUESTS", "SERMONS", "TEAMS", "ROLES", "PAGES", "APP_DOWNLOADS", "SECURITY"
     };
 
     private static async Task EnsureTenantRolePermissionsTableAsync(NpgsqlConnection conn)
@@ -1162,6 +1512,19 @@ WHERE m.enabled = true
           SELECT 1
           FROM public.tenant_module_licenses l
           WHERE l.tenant_id = @tenant_id
+            AND (
+                l.source NOT LIKE 'plan:%'
+                OR NOT EXISTS (
+                    SELECT 1
+                    FROM public.tenant_subscriptions subscription
+                    JOIN public.subscription_plan_publications publication
+                      ON publication.plan_id = subscription.plan_id
+                     AND publication.version = subscription.applied_plan_version
+                    WHERE subscription.tenant_id = @tenant_id
+                      AND publication.definition_json ? 'pages'
+                      AND jsonb_array_length(publication.definition_json->'pages') > 0
+                )
+            )
             AND l.module_code = m.code
             AND l.status = 'active'
             AND l.starts_at_utc <= now()
@@ -1177,10 +1540,32 @@ WHERE m.enabled = true
             var code = rdr["code"]?.ToString();
             if (!string.IsNullOrWhiteSpace(code)) modules.Add(code);
         }
+        await rdr.DisposeAsync();
 
         foreach (var pair in PageModules)
         {
             if (modules.Contains(pair.Value)) keys.Add(pair.Key);
+        }
+
+        await using var packagePages = new NpgsqlCommand(@"
+SELECT DISTINCT page.value
+FROM public.tenant_subscriptions subscription
+JOIN public.subscription_plan_publications publication
+  ON publication.plan_id = subscription.plan_id
+ AND publication.version = subscription.applied_plan_version
+CROSS JOIN LATERAL jsonb_array_elements_text(
+  COALESCE(publication.definition_json->'pages', '[]'::jsonb)
+) page(value)
+WHERE subscription.tenant_id = @tenant_id
+  AND subscription.status = 'active'
+  AND subscription.starts_at_utc <= now()
+  AND (subscription.ends_at_utc IS NULL OR subscription.ends_at_utc > now());", conn);
+        packagePages.Parameters.AddWithValue("tenant_id", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
+        await using var pageReader = await packagePages.ExecuteReaderAsync();
+        while (await pageReader.ReadAsync())
+        {
+            var key = pageReader.GetString(0);
+            if (!string.IsNullOrWhiteSpace(key)) keys.Add(key);
         }
 
         keys.Remove("MULTITENANT");
@@ -1189,38 +1574,35 @@ WHERE m.enabled = true
 
     private async Task<List<string>> LoadPermissions(NpgsqlConnection conn, string? role, Guid tenantId)
     {
+        return await LoadPermissions(conn, new[] { role }, tenantId);
+    }
+
+    private async Task<List<string>> LoadPermissions(NpgsqlConnection conn, IEnumerable<string?> roles, Guid tenantId)
+    {
         await EnsureTenantRolePermissionsTableAsync(conn);
         var licensedKeys = await LoadLicensedPageKeysAsync(conn, tenantId);
-        if (string.Equals(role, "admin", StringComparison.OrdinalIgnoreCase))
+        var roleList = roles.Select(r => (r ?? "").Trim()).Where(r => r.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var isAdmin = roleList.Any(r => string.Equals(r, "admin", StringComparison.OrdinalIgnoreCase));
+        if (isAdmin)
             return licensedKeys.OrderBy(k => k).ToList();
 
         var pages = new List<string>();
-        var roleList = roles.Select(r => (r ?? "").Trim()).Where(r => r.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         if (roleList.Length == 0) return pages;
 
         var permSql = @"
-<<<<<<< HEAD
-SELECT DISTINCT UPPER(rp.page_key)
-FROM role_permissions rp
-JOIN roles r ON r.id = rp.role_id
-WHERE LOWER(r.name) = ANY(@roles);";
-
-        await using var permCmd = new NpgsqlCommand(permSql, conn);
-        permCmd.Parameters.AddWithValue("roles", NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Text, roleList.Select(r => r.ToLowerInvariant()).ToArray());
-=======
-WITH selected_role AS (
-    SELECT id FROM roles WHERE LOWER(name) = LOWER(@role) LIMIT 1
+WITH selected_roles AS (
+    SELECT id FROM roles WHERE LOWER(name) = ANY(@roles)
 ),
 tenant_perms AS (
     SELECT trp.page_key
     FROM tenant_role_permissions trp
-    JOIN selected_role sr ON sr.id = trp.role_id
+    JOIN selected_roles sr ON sr.id = trp.role_id
     WHERE trp.tenant_id = @tenant_id
 ),
 global_perms AS (
     SELECT rp.page_key
     FROM role_permissions rp
-    JOIN selected_role sr ON sr.id = rp.role_id
+    JOIN selected_roles sr ON sr.id = rp.role_id
     WHERE NOT EXISTS (SELECT 1 FROM tenant_perms)
 )
 SELECT page_key FROM tenant_perms
@@ -1228,9 +1610,8 @@ UNION
 SELECT page_key FROM global_perms;";
 
         await using var permCmd = new NpgsqlCommand(permSql, conn);
-        permCmd.Parameters.AddWithValue("role", role ?? "");
+        permCmd.Parameters.AddWithValue("roles", NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Text, roleList.Select(r => r.ToLowerInvariant()).ToArray());
         permCmd.Parameters.AddWithValue("tenant_id", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
 
         await using var permRdr = await permCmd.ExecuteReaderAsync();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1241,6 +1622,7 @@ SELECT page_key FROM global_perms;";
                 pages.Add(pageKey);
         }
 
+        pages.RemoveAll(page => string.Equals(page, "MULTITENANT", StringComparison.OrdinalIgnoreCase) || string.Equals(page, "SAAS_BILLING", StringComparison.OrdinalIgnoreCase));
         return pages;
     }
 
@@ -1291,6 +1673,38 @@ SELECT page_key FROM global_perms;";
 
             await using var conn = new NpgsqlConnection(_connStr);
             await conn.OpenAsync();
+
+            var configuredRootUsername = _config["RootAdmin:Username"]?.Trim().ToLowerInvariant();
+            var configuredRootEmail = _config["RootAdmin:GoogleEmail"]?.Trim().ToLowerInvariant();
+            if (currentTenant?.IsRootTenant == true &&
+                !string.IsNullOrWhiteSpace(configuredRootUsername) &&
+                !string.IsNullOrWhiteSpace(configuredRootEmail) &&
+                string.Equals(input, configuredRootUsername, StringComparison.OrdinalIgnoreCase))
+            {
+                await using var bindRootEmail = new NpgsqlCommand(@"
+WITH root_user AS (
+    SELECT id
+    FROM public.users
+    WHERE tenant_id = @tenant_id
+      AND LOWER(TRIM(username)) = @root_username
+    LIMIT 1
+)
+UPDATE public.users
+SET email = NULL
+WHERE tenant_id = @tenant_id
+  AND id <> COALESCE((SELECT id FROM root_user), '00000000-0000-0000-0000-000000000000'::uuid)
+  AND LOWER(TRIM(COALESCE(email, ''))) = @root_email;
+
+UPDATE public.users
+SET email = @root_email
+WHERE tenant_id = @tenant_id
+  AND LOWER(TRIM(username)) = @root_username;", conn);
+                bindRootEmail.Parameters.AddWithValue("tenant_id", NpgsqlTypes.NpgsqlDbType.Uuid, currentTenantId);
+                bindRootEmail.Parameters.AddWithValue("root_username", NpgsqlTypes.NpgsqlDbType.Text, configuredRootUsername);
+                bindRootEmail.Parameters.AddWithValue("root_email", NpgsqlTypes.NpgsqlDbType.Text, configuredRootEmail);
+                await bindRootEmail.ExecuteNonQueryAsync();
+                _logger.LogInformation("Ensured configured recovery email is bound to root account {Username}.", configuredRootUsername);
+            }
 
             // Find the user (username OR email, case-insensitive).
             var lookupSql = @"
@@ -1434,7 +1848,10 @@ LIMIT 2;", conn))
                     matchedTenantSlug,
                     userId,
                     MaskEmail(email));
-                // Still return the generic message; do not leak failure to client.
+                return StatusCode(503, new
+                {
+                    message = "The password reset email could not be delivered right now. Please contact the administrator or try again shortly."
+                });
             }
 
             return Ok(generic);
@@ -1523,13 +1940,40 @@ LIMIT 2;", conn))
             // Hash the new password with the same hasher used in Login.
             var newHash = _pwHasher.HashPassword(null!, dto.NewPassword!);
 
+            int updatedRows;
             await using (var upd = new NpgsqlCommand(
                 @"UPDATE users SET passwordhash = @h WHERE id = @id AND tenant_id = @tenant_id;", conn, tx))
             {
                 upd.Parameters.AddWithValue("h", newHash);
                 upd.Parameters.Add("id", NpgsqlTypes.NpgsqlDbType.Uuid).Value = userId;
                 upd.Parameters.AddWithValue("tenant_id", NpgsqlTypes.NpgsqlDbType.Uuid, currentTenantId);
-                await upd.ExecuteNonQueryAsync();
+                updatedRows = await upd.ExecuteNonQueryAsync();
+            }
+
+            if (updatedRows != 1)
+            {
+                await tx.RollbackAsync();
+                _logger.LogError("Password reset matched token but updated {UpdatedRows} users. UserId={UserId} TenantId={TenantId}",
+                    updatedRows, userId, currentTenantId);
+                return StatusCode(500, new { message = "The password could not be saved. Please request a new reset link." });
+            }
+
+            await using (var verify = new NpgsqlCommand(
+                @"SELECT passwordhash FROM users WHERE id = @id AND tenant_id = @tenant_id LIMIT 1;", conn, tx))
+            {
+                verify.Parameters.Add("id", NpgsqlTypes.NpgsqlDbType.Uuid).Value = userId;
+                verify.Parameters.AddWithValue("tenant_id", NpgsqlTypes.NpgsqlDbType.Uuid, currentTenantId);
+                var savedHash = (await verify.ExecuteScalarAsync())?.ToString();
+                var verification = string.IsNullOrWhiteSpace(savedHash)
+                    ? PasswordVerificationResult.Failed
+                    : _pwHasher.VerifyHashedPassword(null!, savedHash, dto.NewPassword!);
+                if (verification == PasswordVerificationResult.Failed)
+                {
+                    await tx.RollbackAsync();
+                    _logger.LogError("Password reset hash verification failed after update. UserId={UserId} TenantId={TenantId}",
+                        userId, currentTenantId);
+                    return StatusCode(500, new { message = "The password could not be verified after saving. Please request a new reset link." });
+                }
             }
 
             await using (var consume = new NpgsqlCommand(
@@ -1676,6 +2120,10 @@ LIMIT 2;";
 
     private string ResolvePublicBaseUrl()
     {
+        var configuredPublicUrl = _config["App:PublicUrl"]?.Trim();
+        if (!string.IsNullOrWhiteSpace(configuredPublicUrl))
+            return configuredPublicUrl.TrimEnd('/');
+
         var forwardedProto = Request.Headers["X-Forwarded-Proto"].FirstOrDefault();
         var forwardedHost = Request.Headers["X-Forwarded-Host"].FirstOrDefault();
         if (!string.IsNullOrWhiteSpace(forwardedHost))
@@ -1809,5 +2257,4 @@ If you didn't request this, you can safely ignore this email.
 — Mahima Ministries";
     }
 }
-
 
