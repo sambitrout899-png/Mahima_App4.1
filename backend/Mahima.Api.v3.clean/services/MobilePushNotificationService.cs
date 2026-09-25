@@ -338,7 +338,7 @@ namespace Mahima.Api.v3.clean.Services
                     },
                     data = new Dictionary<string, string>
                     {
-                        ["kind"] = "incoming_call",
+                        ["kind"] = "call",
                         ["chatId"] = chatId.ToString(),
                         ["callerId"] = callerId.ToString(),
                         ["callerName"] = callerName,

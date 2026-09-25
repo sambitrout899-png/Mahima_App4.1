@@ -1,10 +1,5 @@
-<<<<<<< HEAD
 {
-  "_comment": "Curated verse pack used by ScriptureService to ground the AI Pastor. References are language-independent and are the anti-hallucination anchor. English text is authoritative; Hindi/Punjabi are pastoral renderings. Extend freely — add objects to 'verses'.",
-=======
-﻿{
   "_comment": "Curated verse pack used by ScriptureService to ground the AI Counseller. References are language-independent and are the anti-hallucination anchor. English text is authoritative; Hindi/Punjabi are pastoral renderings. Extend freely — add objects to 'verses'.",
->>>>>>> 6b902a41 (Update Mahima app server files and related changes)
   "verses": [
     {
       "theme": "anxiety",
