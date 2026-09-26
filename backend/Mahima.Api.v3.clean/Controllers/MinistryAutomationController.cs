@@ -75,6 +75,8 @@ namespace Mahima.Api.v3.clean.Controllers
                 ["WelcomeTime"] = dto.WelcomeTime,
                 ["NightPrayerTime"] = dto.NightPrayerTime,
                 ["SundayServiceReminderTime"] = dto.SundayServiceReminderTime,
+                [SundayReminderDelivery.ChannelsKey] = string.Join(",", dto.SundayServiceReminderChannels.Distinct()),
+                [SundayReminderDelivery.TemplateKey] = dto.SundayServiceReminderWhatsAppTemplateSid.Trim(),
                 ["DeliveryWindowMinutes"] = Math.Clamp(dto.DeliveryWindowMinutes, 1, 720).ToString(CultureInfo.InvariantCulture),
                 ["DailyWordEnabled"] = dto.DailyWordEnabled.ToString(),
                 ["WelcomeEnabled"] = dto.WelcomeEnabled.ToString(),
@@ -117,6 +119,24 @@ namespace Mahima.Api.v3.clean.Controllers
             var message = BuildMultilingualMessage(languages, code => MinistryMessageFactory.Build(messageType, nowLocal, code));
             if (string.IsNullOrWhiteSpace(message))
                 return BadRequest("Unknown message type.");
+
+            if (messageType == "sunday-service-reminder")
+            {
+                var settings = await ReadSettingsAsync();
+                var errors = new List<string>();
+                await SundayReminderDelivery.DeliverAsync(_db,
+                    HttpContext.RequestServices.GetRequiredService<Mahima.Api.v3.clean.Helpers.IEmailService>(),
+                    await GetCurrentTenantIdAsync(), settings, message, async () =>
+                    {
+                        var chatMessage = await _pastorBot.SendJaiMasihMessageAsync(message, HttpContext.RequestAborted);
+                        await NotifyJaiMasihMembersAsync(chatMessage);
+                    }, async (key, send) =>
+                    {
+                        try { await send(); }
+                        catch (Exception ex) { errors.Add($"{key}: {ex.Message}"); }
+                    }, HttpContext.RequestAborted);
+                return Ok(new { type = messageType, channels = SundayReminderDelivery.Channels(settings), errors });
+            }
 
             var sent = await _pastorBot.SendJaiMasihMessageAsync(message, HttpContext.RequestAborted);
             await NotifyJaiMasihMembersAsync(sent);
@@ -302,6 +322,8 @@ namespace Mahima.Api.v3.clean.Controllers
                 WelcomeTime = Text(values, "WelcomeTime", "07:00"),
                 NightPrayerTime = NormalizeNightPrayerTime(Text(values, "NightPrayerTime", "18:30")),
                 SundayServiceReminderTime = Text(values, "SundayServiceReminderTime", "08:00"),
+                SundayServiceReminderChannels = SundayReminderDelivery.Channels(values).ToList(),
+                SundayServiceReminderWhatsAppTemplateSid = Text(values, SundayReminderDelivery.TemplateKey, ""),
                 DeliveryWindowMinutes = Int(values, "DeliveryWindowMinutes", 90),
                 DailyWordEnabled = Bool(values, "DailyWordEnabled", true),
                 WelcomeEnabled = Bool(values, "WelcomeEnabled", true),
@@ -311,6 +333,13 @@ namespace Mahima.Api.v3.clean.Controllers
 
         private static string Validate(MinistryAutomationSettingsDto dto)
         {
+            if (dto.SundayServiceReminderChannels == null || dto.SundayServiceReminderChannels.Count == 0 ||
+                dto.SundayServiceReminderChannels.Any(c => !SundayReminderDelivery.AllowedChannels.Contains(c)))
+                return "Select at least one supported Sunday reminder channel.";
+            if (dto.SundayServiceReminderChannels.Contains("whatsapp") &&
+                !System.Text.RegularExpressions.Regex.IsMatch(dto.SundayServiceReminderWhatsAppTemplateSid ?? "", "^HX[0-9a-fA-F]{32}$"))
+                return "Configure an approved WhatsApp reminder template SID (HX followed by 32 hexadecimal characters).";
+            dto.SundayServiceReminderWhatsAppTemplateSid ??= "";
             foreach (var value in new[] { dto.DailyWordTime, dto.WelcomeTime, dto.NightPrayerTime, dto.SundayServiceReminderTime })
             {
                 if (!TimeSpan.TryParseExact(value, @"hh\:mm", CultureInfo.InvariantCulture, out _))

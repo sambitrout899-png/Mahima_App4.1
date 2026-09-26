@@ -28,6 +28,8 @@ const defaults = {
   welcomeTime: "07:00",
   nightPrayerTime: "18:30",
   sundayServiceReminderTime: "08:00",
+  sundayServiceReminderChannels: ["jai-masih"],
+  sundayServiceReminderWhatsAppTemplateSid: "",
   deliveryWindowMinutes: 90,
   dailyWordEnabled: true,
   welcomeEnabled: true,
@@ -39,7 +41,7 @@ const messageTypes = [
   { key: "daily-word", label: "Daily Word", desc: "Fresh Bible verse, reflection, and prayer.", field: "dailyWordTime", enabled: "dailyWordEnabled" },
   { key: "welcome", label: "Welcome", desc: "Morning welcome and blessing.", field: "welcomeTime", enabled: "welcomeEnabled" },
   { key: "night-prayer", label: "Night Prayer", desc: "Tuesday and Friday night prayer reminder at 6:30 PM.", field: "nightPrayerTime", enabled: "nightPrayerEnabled" },
-  { key: "sunday-service-reminder", label: "Sunday Service Reminder", desc: "Sunday 10:00 AM service reminder, sent at 8:00 AM.", field: "sundayServiceReminderTime", enabled: "sundayServiceReminderEnabled" },
+  { key: "sunday-service-reminder", label: "Sunday Church Reminder", desc: "Every Sunday at 8:00 AM to all members (in the selected time zone).", field: "sundayServiceReminderTime", enabled: "sundayServiceReminderEnabled" },
 ];
 
 const fallbackLanguages = [
@@ -295,13 +297,13 @@ export default function MinistryAutomationPage() {
     setTriggering(type);
     setNotice("");
     try {
-      await apiFetch("/ministry-automation/trigger", {
+      const result = await apiFetch("/ministry-automation/trigger", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messageType: type, languages: selectedLanguageCodes }),
       });
-      setNotice("Message sent to Jai Masih.");
       await load();
+      setNotice(result?.errors?.length ? `Some deliveries failed: ${result.errors.join("; ")}` : "Message sent using the saved channels.");
     } catch (err) {
       setNotice(err.message || "Could not send message.");
     } finally {
@@ -703,6 +705,34 @@ export default function MinistryAutomationPage() {
                   className="h-6 w-6 accent-emerald-700"
                 />
               </div>
+
+              {item.key === "sunday-service-reminder" && (
+                <fieldset className="mt-4 rounded-xl border border-emerald-100 p-3">
+                  <legend className="px-1 text-sm font-bold">Communication channels</legend>
+                  <div className="flex flex-wrap gap-4">
+                    {[["jai-masih", "Jai Masih"], ["sms", "SMS"], ["whatsapp", "WhatsApp"], ["email", "Email"]].map(([channel, label]) => (
+                      <label key={channel} className="flex items-center gap-2 text-sm font-semibold">
+                        <input type="checkbox" className="accent-emerald-700"
+                          checked={settings.sundayServiceReminderChannels.includes(channel)}
+                          onChange={(e) => update("sundayServiceReminderChannels", e.target.checked
+                            ? [...settings.sundayServiceReminderChannels, channel]
+                            : settings.sundayServiceReminderChannels.filter((value) => value !== channel))} />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">Jai Masih is selected by default. Enable other channels after configuring SMS/WhatsApp and email providers. Save settings before sending a test to all members.</p>
+                  {settings.sundayServiceReminderChannels.includes("whatsapp") && (
+                    <label className="mt-3 block text-sm font-semibold">
+                      Approved WhatsApp reminder template SID
+                      <input type="text" value={settings.sundayServiceReminderWhatsAppTemplateSid}
+                        onChange={(e) => update("sundayServiceReminderWhatsAppTemplateSid", e.target.value)}
+                        placeholder="HX..." className="mt-1 block w-full rounded-lg border p-2" />
+                      <span className="text-xs font-normal text-slate-500">Use an approved Sunday church reminder template with no variables.</span>
+                    </label>
+                  )}
+                </fieldset>
+              )}
 
               <div className="mt-5 flex flex-wrap items-center gap-3">
                 <label className="inline-flex items-center gap-2 rounded-xl border border-amber-200 px-3 py-2">

@@ -109,6 +109,34 @@ namespace Mahima.Api.v3.clean.Services
                 if (await AlreadySentAsync(db, tenantId, schedule.Key, nowLocal.Date, ct)) continue;
 
                 var content = schedule.BuildMessage(nowLocal);
+                if (schedule.Key == "sunday-service-reminder")
+                {
+                    var failed = false;
+                    await SundayReminderDelivery.DeliverAsync(db,
+                        serviceProvider.GetRequiredService<Mahima.Api.v3.clean.Helpers.IEmailService>(),
+                        tenantId, settings, content, async () =>
+                        {
+                            var reminder = await pastorBot.SendJaiMasihMessageAsync(content, tenantId, ct);
+                            await NotifyChatAsync(db, reminder, mobilePush, delivery, "Sunday Church Reminder", ct, false);
+                        }, async (deliveryKey, send) =>
+                        {
+                            var key = $"{schedule.Key}:{deliveryKey}";
+                            if (await AlreadySentAsync(db, tenantId, key, nowLocal.Date, ct)) return;
+                            try
+                            {
+                                await send();
+                                await RecordSentAsync(db, tenantId, key, nowLocal.Date, ct);
+                            }
+                            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                            catch (Exception ex)
+                            {
+                                failed = true;
+                                _logger.LogWarning(ex, "Sunday reminder delivery failed: {DeliveryKey}", key);
+                            }
+                        }, ct);
+                    if (!failed) await RecordSentAsync(db, tenantId, schedule.Key, nowLocal.Date, ct);
+                    continue;
+                }
                 MessageDto sent = await pastorBot.SendJaiMasihMessageAsync(content, tenantId, ct);
                 await RecordSentAsync(db, tenantId, schedule.Key, nowLocal.Date, ct);
                 await NotifyChatAsync(db, sent, mobilePush, delivery, ScheduleSubject(schedule.Key), ct);
@@ -183,7 +211,7 @@ WHERE tenant_id = @tenantId AND ""Birthday"" IS NOT NULL";
 
         private async Task NotifyChatAsync(
             MahimaDbContext db, MessageDto message, IMobilePushNotificationService? mobilePush,
-            INotificationDelivery delivery, string subject, CancellationToken ct)
+            INotificationDelivery delivery, string subject, CancellationToken ct, bool sendEmail = true)
         {
             var memberIds = await db.ChatMembers
                 .AsNoTracking()
@@ -209,6 +237,8 @@ WHERE tenant_id = @tenantId AND ""Birthday"" IS NOT NULL";
                 }
             }
 
+            if (!sendEmail) return;
+
             var emails = await db.Users.AsNoTracking()
                 .Where(u => memberIds.Contains(u.Id) && u.Email != null)
                 .Select(u => u.Email!)
@@ -222,7 +252,7 @@ WHERE tenant_id = @tenantId AND ""Birthday"" IS NOT NULL";
             "daily-word" => "Today's Word",
             "welcome" => "Welcome",
             "night-prayer" => "Night Prayer",
-            "sunday-service-reminder" => "Sunday Service Reminder",
+            "sunday-service-reminder" => "Sunday Church Reminder",
             _ => "Mahima Ministry Update"
         };
 

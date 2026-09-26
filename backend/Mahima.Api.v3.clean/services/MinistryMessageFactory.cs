@@ -25,7 +25,7 @@ namespace Mahima.Api.v3.clean.Services
                 case "night-prayer":
                     return BuildNightPrayer(nowLocal);
                 case "sunday-service-reminder":
-                    return "Sunday Service reminder: Jai Masih family, join us this morning at 10:00 AM for worship and fellowship. Come prepared in prayer - see you at church!";
+                    return "Sunday Church Reminder: Jai Masih family, join us this morning at 10:00 AM for worship and fellowship. Come prepared in prayer - see you at church!";
                 default:
                     return string.Empty;
             }
