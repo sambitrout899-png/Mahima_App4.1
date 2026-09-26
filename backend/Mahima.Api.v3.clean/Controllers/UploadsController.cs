@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
+using ImageMagick;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -71,7 +72,7 @@ namespace Mahima.Api.v3.clean.Controllers
         [HttpPost]
         [RequestSizeLimit(MaxBytes)]
         [RequestFormLimits(MultipartBodyLengthLimit = MaxBytes)]
-        public async Task<IActionResult> Upload([FromForm] IFormFile file)
+        public async Task<IActionResult> Upload([FromForm] IFormFile file, [FromForm] string? purpose = null)
         {
             if (file == null || file.Length == 0)
                 return BadRequest("file is required.");
@@ -93,6 +94,17 @@ namespace Mahima.Api.v3.clean.Controllers
             extension = new string(extension.Where(ch => char.IsLetterOrDigit(ch) || ch == '.').ToArray());
             if (string.IsNullOrWhiteSpace(extension)) extension = ".bin";
 
+            // HEIC/HEIF (the default photo format on iPhones, and some Android phones) can't be
+            // displayed by an <img> tag in any mainstream browser or Android WebView. Convert to
+            // JPEG on upload so attachments actually render for every viewer.
+            var needsHeicConversion = contentType.Equals("image/heic", StringComparison.OrdinalIgnoreCase)
+                || contentType.Equals("image/heif", StringComparison.OrdinalIgnoreCase);
+            if (needsHeicConversion)
+            {
+                extension = ".jpg";
+                contentType = "image/jpeg";
+            }
+
             var uploadRoot = _config["Uploads:Root"]
                 ?? Environment.GetEnvironmentVariable("MAHIMA_UPLOADS_ROOT");
             if (string.IsNullOrWhiteSpace(uploadRoot))
@@ -111,7 +123,9 @@ namespace Mahima.Api.v3.clean.Controllers
                 }
             }
 
-            var relativeFolder = Path.Combine("tenants", GetCurrentTenantId().ToString("N"), "chat", DateTime.UtcNow.ToString("yyyy"), DateTime.UtcNow.ToString("MM"));
+            var allowedPurposes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "chat", "branding" };
+            var folderSegment = allowedPurposes.Contains(purpose?.Trim() ?? "") ? purpose!.Trim().ToLowerInvariant() : "chat";
+            var relativeFolder = Path.Combine("tenants", GetCurrentTenantId().ToString("N"), folderSegment, DateTime.UtcNow.ToString("yyyy"), DateTime.UtcNow.ToString("MM"));
             var targetFolder = Path.Combine(uploadRoot, relativeFolder);
 
             try
@@ -131,8 +145,21 @@ namespace Mahima.Api.v3.clean.Controllers
 
             try
             {
-                await using var stream = System.IO.File.Create(fullPath);
-                await file.CopyToAsync(stream);
+                if (needsHeicConversion)
+                {
+                    using var source = new MemoryStream();
+                    await file.CopyToAsync(source);
+                    source.Position = 0;
+                    using var image = new MagickImage(source);
+                    image.Format = MagickFormat.Jpg;
+                    image.Quality = 90;
+                    image.Write(fullPath);
+                }
+                else
+                {
+                    await using var stream = System.IO.File.Create(fullPath);
+                    await file.CopyToAsync(stream);
+                }
             }
             catch (UnauthorizedAccessException ex)
             {
@@ -140,6 +167,11 @@ namespace Mahima.Api.v3.clean.Controllers
                 return StatusCode(
                     StatusCodes.Status500InternalServerError,
                     "Upload folder is not writable. Please check server folder permissions.");
+            }
+            catch (MagickException ex)
+            {
+                _logger.LogError(ex, "HEIC/HEIF conversion failed for {FileName}", file.FileName);
+                return BadRequest("Could not process this photo. Please try a different format (JPG/PNG).");
             }
             catch (Exception ex)
             {
