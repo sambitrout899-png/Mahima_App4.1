@@ -169,20 +169,13 @@ namespace Mahima.Api.v3.clean.Controllers
             if (_mobilePush == null)
                 return StatusCode(503, new { message = "Mobile push service is not registered." });
 
-            var message = new MessageDto
-            {
-                Id = Guid.NewGuid(),
-                ChatId = Guid.Empty,
-                SenderId = Guid.Empty,
-                Content = string.IsNullOrWhiteSpace(dto?.Message)
-                    ? "Test notification from Mahima Ministry"
-                    : dto!.Message!.Trim(),
-                ContentType = "text",
-                CreatedAt = DateTime.UtcNow
-            };
+            var tenantId = await GetCurrentTenantIdAsync();
+            var message = string.IsNullOrWhiteSpace(dto?.Message)
+                ? "Test notification from Mahima Ministry"
+                : dto!.Message!.Trim();
 
-            await _mobilePush.NotifyChatMessageAsync(Guid.Empty, Guid.Empty, new[] { userId }, message);
-            return Ok(new { sent = true });
+            var sent = await _mobilePush.SendTestPushAsync(tenantId, userId, message);
+            return Ok(new { sent });
         }
 
         private Guid CurrentUserId()

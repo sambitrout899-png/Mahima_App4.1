@@ -21,6 +21,7 @@ namespace Mahima.Api.v3.clean.Services
     {
         Task NotifyChatMessageAsync(Guid chatId, Guid senderId, IEnumerable<Guid> memberIds, MessageDto message);
         Task NotifyIncomingCallAsync(Guid chatId, Guid callerId, IEnumerable<Guid> memberIds, string callType);
+        Task<bool> SendTestPushAsync(Guid tenantId, Guid userId, string message);
     }
 
     /// <summary>
@@ -245,6 +246,11 @@ namespace Mahima.Api.v3.clean.Services
                 .Select(c => c.TenantId)
                 .FirstOrDefaultAsync();
 
+            return await ReadTokensForTenantAsync(tenantId, userIds);
+        }
+
+        private async Task<List<string>> ReadTokensForTenantAsync(Guid tenantId, IEnumerable<Guid> userIds)
+        {
             if (tenantId == Guid.Empty)
                 return new List<string>();
 
@@ -260,6 +266,52 @@ namespace Mahima.Api.v3.clean.Services
                 .Where(token => !string.IsNullOrWhiteSpace(token))
                 .Distinct()
                 .ToList();
+        }
+
+        public async Task<bool> SendTestPushAsync(Guid tenantId, Guid userId, string message)
+        {
+            var projectId = ResolveFirebaseProjectId();
+            if (string.IsNullOrWhiteSpace(projectId))
+            {
+                _logger.LogWarning("Test push: Firebase project id is not configured.");
+                return false;
+            }
+
+            var tokens = await ReadTokensForTenantAsync(tenantId, new[] { userId });
+            if (tokens.Count == 0)
+            {
+                _logger.LogWarning("Test push: no registered device tokens for user {UserId} in tenant {TenantId}.", userId, tenantId);
+                return false;
+            }
+
+            string accessToken;
+            try
+            {
+                accessToken = await GetAccessTokenAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Test push: could not obtain access token — push skipped.");
+                return false;
+            }
+
+            var preview = string.IsNullOrWhiteSpace(message) ? "Test notification" : message.Trim();
+            var testMessage = new MessageDto
+            {
+                Id = Guid.NewGuid(),
+                ChatId = Guid.Empty,
+                SenderId = Guid.Empty,
+                Content = preview,
+                ContentType = "text",
+                CreatedAt = DateTime.UtcNow
+            };
+
+            _logger.LogInformation("Sending test push to {TokenCount} token(s) for user {UserId}.", tokens.Count, userId);
+
+            var tasks = tokens.Select(token =>
+                SendFcmV1Async(projectId, accessToken, token, "Mahima Ministry", preview, Guid.Empty, testMessage));
+            await Task.WhenAll(tasks);
+            return true;
         }
 
         private string? ResolveFirebaseProjectId()
