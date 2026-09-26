@@ -222,7 +222,7 @@ WHERE tenant_id = @tenantId AND ""Birthday"" IS NOT NULL";
             "daily-word" => "Today's Word",
             "welcome" => "Welcome",
             "night-prayer" => "Night Prayer",
-            "saturday-church-reminder" => "Saturday Reminder",
+            "sunday-service-reminder" => "Sunday Service Reminder",
             _ => "Mahima Ministry Update"
         };
 
@@ -263,11 +263,11 @@ WHERE tenant_id = @tenantId AND ""Birthday"" IS NOT NULL";
                 });
             }
 
-            if (GetBool(settings, "SaturdayReminderEnabled", true))
+            if (GetBool(settings, "SundayServiceReminderEnabled", true))
             {
-                list.Add(new ScheduledMessage("saturday-church-reminder", GetTime(settings, "SaturdayReminderTime", "18:00"), _ => BuildDefaultMultilingualMessage("saturday-church-reminder", nowLocal, languages))
+                list.Add(new ScheduledMessage("sunday-service-reminder", GetTime(settings, "SundayServiceReminderTime", "08:00"), _ => BuildDefaultMultilingualMessage("sunday-service-reminder", nowLocal, languages))
                 {
-                    DaysOfWeek = new HashSet<DayOfWeek> { DayOfWeek.Saturday }
+                    DaysOfWeek = new HashSet<DayOfWeek> { DayOfWeek.Sunday }
                 });
             }
 

@@ -24,8 +24,8 @@ namespace Mahima.Api.v3.clean.Services
                     return "Jai Masih. Welcome to a new day. May the Lord bless your home, your work, your family, and every conversation today. Walk in faith, humility, and love.";
                 case "night-prayer":
                     return BuildNightPrayer(nowLocal);
-                case "saturday-church-reminder":
-                    return "Saturday reminder: Jai Masih family, let us prepare our hearts for worship and fellowship. Please keep time for church, prayer, and serving one another.";
+                case "sunday-service-reminder":
+                    return "Sunday Service reminder: Jai Masih family, join us this morning at 10:00 AM for worship and fellowship. Come prepared in prayer - see you at church!";
                 default:
                     return string.Empty;
             }
@@ -51,8 +51,8 @@ namespace Mahima.Api.v3.clean.Services
                     return "जय मसीह। नए दिन में आपका स्वागत है। प्रभु आपके घर, काम, परिवार और हर बातचीत को आशीष दे। आज विश्वास, नम्रता और प्रेम में चलें।";
                 case "night-prayer":
                     return BuildNightPrayerHindi(nowLocal);
-                case "saturday-church-reminder":
-                    return "शनिवार स्मरण: जय मसीह परिवार, आइए आराधना और संगति के लिए अपने मन तैयार करें। कृपया कलीसिया, प्रार्थना और सेवा के लिए समय रखें।";
+                case "sunday-service-reminder":
+                    return "रविवार सेवा स्मरण: जय मसीह परिवार, आज सुबह 10:00 बजे आराधना और संगति के लिए हमारे साथ जुड़ें। प्रार्थना सहित तैयार होकर आएं - कलीसिया में मिलते हैं!";
                 default:
                     return Build(messageType, nowLocal);
             }
@@ -68,8 +68,8 @@ namespace Mahima.Api.v3.clean.Services
                     return "ਜੈ ਮਸੀਹ। ਨਵੇਂ ਦਿਨ ਵਿੱਚ ਤੁਹਾਡਾ ਸੁਆਗਤ ਹੈ। ਪ੍ਰਭੂ ਤੁਹਾਡੇ ਘਰ, ਕੰਮ, ਪਰਿਵਾਰ ਅਤੇ ਹਰ ਗੱਲਬਾਤ ਨੂੰ ਆਸੀਸ ਦੇਵੇ। ਅੱਜ ਵਿਸ਼ਵਾਸ, ਨਿਮਰਤਾ ਅਤੇ ਪਿਆਰ ਵਿੱਚ ਚੱਲੋ।";
                 case "night-prayer":
                     return BuildNightPrayerPunjabi(nowLocal);
-                case "saturday-church-reminder":
-                    return "ਸ਼ਨੀਵਾਰ ਯਾਦ ਦਿਹਾਣੀ: ਜੈ ਮਸੀਹ ਪਰਿਵਾਰ, ਆਓ ਆਰਾਧਨਾ ਅਤੇ ਸੰਗਤ ਲਈ ਆਪਣੇ ਦਿਲ ਤਿਆਰ ਕਰੀਏ। ਕਿਰਪਾ ਕਰਕੇ ਕਲੀਸਿਆ, ਪ੍ਰਾਰਥਨਾ ਅਤੇ ਸੇਵਾ ਲਈ ਸਮਾਂ ਰੱਖੋ।";
+                case "sunday-service-reminder":
+                    return "ਐਤਵਾਰ ਸੇਵਾ ਯਾਦ ਦਿਹਾਣੀ: ਜੈ ਮਸੀਹ ਪਰਿਵਾਰ, ਅੱਜ ਸਵੇਰੇ 10:00 ਵਜੇ ਆਰਾਧਨਾ ਅਤੇ ਸੰਗਤ ਲਈ ਸਾਡੇ ਨਾਲ ਜੁੜੋ। ਪ੍ਰਾਰਥਨਾ ਸਹਿਤ ਤਿਆਰ ਹੋ ਕੇ ਆਓ - ਕਲੀਸਿਆ ਵਿੱਚ ਮਿਲਦੇ ਹਾਂ!";
                 default:
                     return Build(messageType, nowLocal);
             }

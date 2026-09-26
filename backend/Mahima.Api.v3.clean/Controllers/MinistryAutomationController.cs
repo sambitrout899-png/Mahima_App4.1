@@ -74,12 +74,12 @@ namespace Mahima.Api.v3.clean.Controllers
                 ["DailyWordTime"] = dto.DailyWordTime,
                 ["WelcomeTime"] = dto.WelcomeTime,
                 ["NightPrayerTime"] = dto.NightPrayerTime,
-                ["SaturdayReminderTime"] = dto.SaturdayReminderTime,
+                ["SundayServiceReminderTime"] = dto.SundayServiceReminderTime,
                 ["DeliveryWindowMinutes"] = Math.Clamp(dto.DeliveryWindowMinutes, 1, 720).ToString(CultureInfo.InvariantCulture),
                 ["DailyWordEnabled"] = dto.DailyWordEnabled.ToString(),
                 ["WelcomeEnabled"] = dto.WelcomeEnabled.ToString(),
                 ["NightPrayerEnabled"] = dto.NightPrayerEnabled.ToString(),
-                ["SaturdayReminderEnabled"] = dto.SaturdayReminderEnabled.ToString()
+                ["SundayServiceReminderEnabled"] = dto.SundayServiceReminderEnabled.ToString()
             };
 
             var tenantId = await GetCurrentTenantIdAsync();
@@ -301,17 +301,17 @@ namespace Mahima.Api.v3.clean.Controllers
                 DailyWordTime = Text(values, "DailyWordTime", "06:30"),
                 WelcomeTime = Text(values, "WelcomeTime", "07:00"),
                 NightPrayerTime = NormalizeNightPrayerTime(Text(values, "NightPrayerTime", "18:30")),
-                SaturdayReminderTime = Text(values, "SaturdayReminderTime", "18:00"),
+                SundayServiceReminderTime = Text(values, "SundayServiceReminderTime", "08:00"),
                 DeliveryWindowMinutes = Int(values, "DeliveryWindowMinutes", 90),
                 DailyWordEnabled = Bool(values, "DailyWordEnabled", true),
                 WelcomeEnabled = Bool(values, "WelcomeEnabled", true),
                 NightPrayerEnabled = Bool(values, "NightPrayerEnabled", true),
-                SaturdayReminderEnabled = Bool(values, "SaturdayReminderEnabled", true)
+                SundayServiceReminderEnabled = Bool(values, "SundayServiceReminderEnabled", true)
             };
 
         private static string Validate(MinistryAutomationSettingsDto dto)
         {
-            foreach (var value in new[] { dto.DailyWordTime, dto.WelcomeTime, dto.NightPrayerTime, dto.SaturdayReminderTime })
+            foreach (var value in new[] { dto.DailyWordTime, dto.WelcomeTime, dto.NightPrayerTime, dto.SundayServiceReminderTime })
             {
                 if (!TimeSpan.TryParseExact(value, @"hh\:mm", CultureInfo.InvariantCulture, out _))
                     return "Times must be in HH:mm format.";
@@ -339,12 +339,12 @@ namespace Mahima.Api.v3.clean.Controllers
             ["DailyWordTime"] = "06:30",
             ["WelcomeTime"] = "07:00",
             ["NightPrayerTime"] = "18:30",
-            ["SaturdayReminderTime"] = "18:00",
+            ["SundayServiceReminderTime"] = "08:00",
             ["DeliveryWindowMinutes"] = "90",
             ["DailyWordEnabled"] = "true",
             ["WelcomeEnabled"] = "true",
             ["NightPrayerEnabled"] = "true",
-            ["SaturdayReminderEnabled"] = "true"
+            ["SundayServiceReminderEnabled"] = "true"
         };
 
         private sealed record LanguageChoice(string Code, string Name);

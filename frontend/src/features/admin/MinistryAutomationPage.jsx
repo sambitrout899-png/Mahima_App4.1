@@ -27,19 +27,19 @@ const defaults = {
   dailyWordTime: "06:30",
   welcomeTime: "07:00",
   nightPrayerTime: "18:30",
-  saturdayReminderTime: "18:00",
+  sundayServiceReminderTime: "08:00",
   deliveryWindowMinutes: 90,
   dailyWordEnabled: true,
   welcomeEnabled: true,
   nightPrayerEnabled: true,
-  saturdayReminderEnabled: true,
+  sundayServiceReminderEnabled: true,
 };
 
 const messageTypes = [
   { key: "daily-word", label: "Daily Word", desc: "Fresh Bible verse, reflection, and prayer.", field: "dailyWordTime", enabled: "dailyWordEnabled" },
   { key: "welcome", label: "Welcome", desc: "Morning welcome and blessing.", field: "welcomeTime", enabled: "welcomeEnabled" },
   { key: "night-prayer", label: "Night Prayer", desc: "Tuesday and Friday night prayer reminder at 6:30 PM.", field: "nightPrayerTime", enabled: "nightPrayerEnabled" },
-  { key: "saturday-church-reminder", label: "Saturday Church Reminder", desc: "Weekend worship preparation reminder.", field: "saturdayReminderTime", enabled: "saturdayReminderEnabled" },
+  { key: "sunday-service-reminder", label: "Sunday Service Reminder", desc: "Sunday 10:00 AM service reminder, sent at 8:00 AM.", field: "sundayServiceReminderTime", enabled: "sundayServiceReminderEnabled" },
 ];
 
 const fallbackLanguages = [
@@ -403,7 +403,7 @@ export default function MinistryAutomationPage() {
             </div>
             <h1 className="text-4xl font-black tracking-normal text-slate-950">Ministry Message Center</h1>
             <p className="mt-2 max-w-3xl text-lg text-slate-600">
-              Schedule daily word, welcome, night prayer, Saturday reminders, and pastor bot messages from one admin panel.
+              Schedule daily word, welcome, night prayer, Sunday service reminders, and pastor bot messages from one admin panel.
             </p>
           </div>
           <button
