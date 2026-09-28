@@ -49,11 +49,14 @@ export function resolveAsset(url) {
 
 // Builds the theme object every section component receives — richer than the old
 // 2-color `colors` prop, sourced from TenantBranding.
-export function buildTheme(branding = {}) {
-  const primary = branding.primaryColor || "#0f766e";
-  const accent = branding.accentColor || "#f59e0b";
-  const neutral = branding.neutralColor || "#f8fafc";
-  const dark = branding.darkColor || "#0f172a";
+// `overrides` lets one section replace any subset of the brand-level colors/fonts
+// (e.g. a section-specific themeOverride) - fields left out fall back to the
+// tenant's brand settings exactly as before.
+export function buildTheme(branding = {}, overrides = {}) {
+  const primary = overrides.primaryColor || branding.primaryColor || "#0f766e";
+  const accent = overrides.accentColor || branding.accentColor || "#f59e0b";
+  const neutral = overrides.neutralColor || branding.neutralColor || "#f8fafc";
+  const dark = overrides.darkColor || branding.darkColor || "#0f172a";
   return {
     primary,
     accent,
@@ -61,8 +64,8 @@ export function buildTheme(branding = {}) {
     dark,
     primarySoft: `${primary}18`,
     accentSoft: `${accent}18`,
-    headingFont: branding.headingFont || "Inter",
-    bodyFont: branding.bodyFont || "Inter",
+    headingFont: overrides.headingFont || branding.headingFont || "Inter",
+    bodyFont: overrides.bodyFont || branding.bodyFont || "Inter",
   };
 }
 
