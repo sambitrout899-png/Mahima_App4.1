@@ -13,11 +13,9 @@ import {
   MapPin,
   MessageCircle,
   Phone,
-  Sparkles,
 } from "lucide-react";
 import { API_BASE } from "../../api";
 import { getToken } from "../auth/authService";
-import TenantLogo from "../../components/TenantLogo";
 import PublicLandingView from "../landing/PublicLandingView";
 import SectionRenderer from "../landing/sections/SectionRenderer";
 import { buildTheme, resolveAsset } from "../landing/sections/shared";
@@ -168,13 +166,12 @@ export default function HomeLanding() {
 
   const { tenant, landing } = config;
   useSeoTags(tenant, landing);
-  const logo = landing.logoUrl || "";
   const heroImage = resolveAsset(landing.heroImageUrl);
   const isAuthenticatedHome = hasCurrentTenantToken() && /^#\/home(?:\/home)?(?:[/?#]|$)/i.test(window.location.hash || "");
 
   if (isAuthenticatedHome) {
     const theme = buildTheme(landing);
-    return <MemberHome tenant={tenant} landing={landing} theme={theme} logo={logo} heroImage={heroImage} loading={loading} navigate={navigate} />;
+    return <MemberHome tenant={tenant} landing={landing} theme={theme} heroImage={heroImage} navigate={navigate} />;
   }
 
   // landing already carries both content and branding fields (merged server-side by
@@ -183,20 +180,7 @@ export default function HomeLanding() {
   return <PublicLandingView tenant={tenant} branding={landing} landing={landing} />;
 }
 
-function getHomeUser() {
-  try {
-    return JSON.parse(localStorage.getItem("mahima_user") || "{}") || {};
-  } catch {
-    return {};
-  }
-}
-
-function MemberHome({ tenant, landing, theme, logo, heroImage, loading, navigate }) {
-  const user = getHomeUser();
-  const displayName = user.displayName || user.name || user.fullName || user.username || "there";
-  const firstName = String(displayName).trim().split(/\s+/)[0] || "there";
-  const today = new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "long" }).format(new Date());
-
+function MemberHome({ tenant, landing, theme, heroImage, navigate }) {
   const quickActions = [
     { label: "Read the Bible", hint: "Continue in the Word", to: "/home/bible", icon: BookOpen, tone: "emerald" },
     { label: "Prayer requests", hint: "Pray, care and follow up", to: "/home/prayerrequests", icon: HandHeart, tone: "rose" },
@@ -206,26 +190,8 @@ function MemberHome({ tenant, landing, theme, logo, heroImage, loading, navigate
 
   return (
     <div className="mahima-home-dashboard" style={{ "--tenant-primary": theme.primary, "--tenant-accent": theme.accent }}>
-      <section className="mahima-home-hero">
-        {heroImage && <img src={heroImage} alt="" aria-hidden="true" className="mahima-home-hero-image absolute inset-0 h-full w-full object-cover" />}
-        <div className="mahima-home-hero-glow" aria-hidden="true" />
-        <div className="mahima-home-hero-copy">
-          <div className="mahima-home-kicker"><Sparkles aria-hidden="true" /> Ministry command centre</div>
-          <p className="mahima-home-date">{today}</p>
-          <p className="mahima-home-date">Welcome back, {firstName}.</p>
-          <h1>{landing.heroTitle || tenant.name || "Church Community"}</h1>
-          <p className="mahima-home-lead">{landing.heroSubtitle || `Everything you need to worship, serve and stay connected with ${tenant.name || "your church"}—in one calm workspace.`}</p>
-          <div className="mahima-home-hero-actions">
-            <button type="button" onClick={() => navigate("/home/prayerrequests")} className="mahima-home-primary-action"><HandHeart aria-hidden="true" /> View prayer wall</button>
-            <button type="button" onClick={() => navigate("/home/user-manual")} className="mahima-home-secondary-action"><CircleHelp aria-hidden="true" /> Explore the user manual</button>
-          </div>
-        </div>
-        <div className="mahima-home-identity" aria-label={`${tenant.name || "Church"} workspace`}>
-          <div className="mahima-home-logo-wrap"><TenantLogo src={logo} name={tenant.name || landing.heroTitle} className="mahima-home-logo" /></div>
-          <span>Your church workspace</span>
-          <strong>{landing.heroTitle || tenant.name || "Church Community"}</strong>
-          <small>{loading ? "Refreshing your workspace…" : "Ready for today"}</small>
-        </div>
+      <section className="mahima-home-hero mahima-home-hero-image-only" aria-label={`${tenant.name || "Church"} hero image`}>
+        {heroImage && <img src={heroImage} alt="" className="mahima-home-hero-image absolute inset-0 h-full w-full object-cover" />}
       </section>
 
       {!!landing.sections?.length && (

@@ -3328,33 +3328,11 @@ th,
 
 .mahima-home-hero-image {
   z-index: -1;
-  opacity: 0.48;
-  filter: brightness(1.08) saturate(1.04);
+  opacity: 1;
 }
 
-.mahima-home-hero::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  opacity: 0.26;
-  background-image:
-    linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px);
-  background-size: 34px 34px;
-  mask-image: linear-gradient(90deg, #000, transparent 74%);
-}
-
-.mahima-home-hero-glow {
-  position: absolute;
-  z-index: -1;
-  right: -90px;
-  bottom: -150px;
-  width: 430px;
-  height: 430px;
-  border: 1px solid rgba(255,255,255,.08);
-  border-radius: 999px;
-  box-shadow: 0 0 0 52px rgba(255,255,255,.025), 0 0 0 104px rgba(255,255,255,.018);
+.mahima-home-hero-image-only::before {
+  display: none;
 }
 
 .mahima-home-hero-copy { max-width: 780px; }
