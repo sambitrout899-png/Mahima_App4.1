@@ -4,8 +4,6 @@ import {
   AlertCircle,
   Bell,
   Camera,
-  BookOpen,
-  CalendarCheck,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -578,6 +576,7 @@ export default function UsersPageCathedralAdvanced() {
   const [broadcastType, setBroadcastType] = useState("Welcome");
   const [broadcastMessage, setBroadcastMessage] = useState("");
   const [broadcastChannels, setBroadcastChannels] = useState(emptyBroadcastChannels);
+  const [whatsAppContentSid, setWhatsAppContentSid] = useState("");
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [sendResults, setSendResults] = useState(null);
   const [modalSearch, setModalSearch] = useState("");
@@ -1092,6 +1091,7 @@ export default function UsersPageCathedralAdvanced() {
     setBroadcastType(type);
     setBroadcastMessage("");
     setBroadcastChannels(emptyBroadcastChannels);
+    setWhatsAppContentSid("");
     setSendResults(null);
     setModalSearch("");
     setBroadcastOpen(true);
@@ -1135,10 +1135,11 @@ export default function UsersPageCathedralAdvanced() {
           whatsapp: Boolean(broadcastChannels.whatsapp),
           sms: Boolean(broadcastChannels.sms),
         },
+        whatsAppContentSid: broadcastChannels.whatsapp ? whatsAppContentSid.trim() || null : null,
       };
 
       const resp = await api.post("/messages/send", payload);
-      setSendResults(resp?.data ?? { success: true });
+      setSendResults(resp?.data ?? { success: false, error: "The server returned no send result." });
     } catch (err) {
       setSendResults({
         success: false,
@@ -1264,7 +1265,7 @@ export default function UsersPageCathedralAdvanced() {
 
         .users-broadcast-grid {
           display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
+          grid-template-columns: minmax(0, 1fr);
           gap: 10px;
         }
 
@@ -1995,17 +1996,15 @@ export default function UsersPageCathedralAdvanced() {
       `}</style>
 
       <div className="users-shell">
-        <div className="users-header">
+        <div className="users-header mahima-standard-page-header" data-mahima-explicit-header="true">
           <div>
-            <h1 className="users-title">{t("page.users.title")}</h1>
-            <div className="users-subtitle">{t("page.users.subtitle")}</div>
+            <h1 className="users-title mahima-standard-page-title" data-mahima-explicit-title="true">{t("page.users.title")}</h1>
+            <div className="users-subtitle mahima-standard-page-subtitle">{t("page.users.subtitle")}</div>
           </div>
 
           <div className="users-header-actions">
             <div className="users-broadcast-grid">
               <IconButton icon={Bell} label={t("page.users.welcomeBroadcast")} onClick={() => openBroadcast("Welcome")} variant="primary" />
-              <IconButton icon={BookOpen} label={t("page.users.dailyWordBroadcast")} onClick={() => openBroadcast("Daily Word")} variant="soft" />
-              <IconButton icon={CalendarCheck} label={t("page.users.meetingBroadcast")} onClick={() => openBroadcast("Meeting Attend")} variant="neutral" />
             </div>
 
             <div className="users-add-top">
@@ -2424,13 +2423,16 @@ export default function UsersPageCathedralAdvanced() {
                     <IconButton
                       icon={KeyRound}
                       label="Generate password"
-                      onClick={() => {
-                        if (!form.username.trim()) {
-                          setModalMessage("Enter username first.");
+                      onClick={async () => {
+                        try {
+                          const resp = await api.get("/auth/generate-password");
+                          const generated = resp?.data?.password;
+                          if (!generated) throw new Error("No password returned.");
+                          setField("password", generated);
+                        } catch (err) {
+                          setModalMessage(err?.message || "Could not generate a password.");
                           setModalSuccess(false);
-                          return;
                         }
-                        setField("password", `${form.username.trim()}123`);
                       }}
                       variant="soft"
                     />
@@ -2499,8 +2501,7 @@ export default function UsersPageCathedralAdvanced() {
                     </div>
                   </div>
                 )}
-              </div>
-
+                </div>
               <div className="users-section">
                 <div className="users-section-label">{t("page.users.profileDetails")}</div>
 
@@ -2672,6 +2673,20 @@ export default function UsersPageCathedralAdvanced() {
                     </label>
                   ))}
                 </div>
+                {broadcastChannels.whatsapp && (
+                  <div style={{ marginTop: 12 }}>
+                    <div className="users-section-label">Approved WhatsApp template SID (optional override)</div>
+                    <input
+                      className="users-input"
+                      value={whatsAppContentSid}
+                      onChange={(event) => setWhatsAppContentSid(event.target.value)}
+                      placeholder="HXxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                    />
+                    <div style={{ marginTop: 6, color: "#64748b", fontSize: 12 }}>
+                      Required for proactive WhatsApp messages outside the 24-hour customer service window. Template variables 1 and 2 are filled with the recipient name and this message.
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="users-section">
@@ -2732,11 +2747,30 @@ export default function UsersPageCathedralAdvanced() {
                     {sendResults.success ? <Check size={18} /> : <AlertCircle size={18} />}
                     <span>
                       {sendResults.success
-                        ? `Message sent${sendResults.attempted ? ` to ${sendResults.attempted} recipients` : ""}.`
-                        : sendResults.error || "Send failed."}
+                        ? `Twilio accepted the message${sendResults.successful ? ` for ${sendResults.successful} recipient${sendResults.successful === 1 ? "" : "s"}` : ""}.`
+                        : sendResults.error || `${sendResults.failed ?? sendResults.attempted ?? 0} recipient message${(sendResults.failed ?? sendResults.attempted) === 1 ? "" : "s"} failed.`}
                     </span>
                   </div>
                 )}
+                {Array.isArray(sendResults?.results) && sendResults.results.map((result) => (
+                  <div
+                    key={result.id || result.phone || result.email}
+                    className="users-alert"
+                    style={{
+                      marginTop: 8,
+                      background: result.success ? "rgba(34,197,94,0.08)" : "#fff3f3",
+                      color: result.success ? "#166534" : "#9b1c1c",
+                      borderColor: result.success ? "rgba(34,197,94,0.2)" : "#ffd1d1",
+                    }}
+                  >
+                    {result.success ? <Check size={18} /> : <AlertCircle size={18} />}
+                    <span>
+                      {result.displayName || result.phone || result.email || "Recipient"}: {result.success
+                        ? `accepted${result.whatsAppMessageSid ? ` (Twilio SID: ${result.whatsAppMessageSid})` : ""}`
+                        : (result.errors || []).join(" ") || "Send failed without an error message."}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
 

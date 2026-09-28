@@ -69,6 +69,7 @@ import {
   Music4,
 } from "lucide-react";
 import { logout as authLogout } from "../features/auth/authService";
+import ChangePasswordModal from "../features/auth/ChangePasswordModal";
 import { tenantLoginRoute } from "../utils/tenantNavigation";
 import TenantLogo from "./TenantLogo";
 import TenantPrintBranding from "./TenantPrintBranding";
@@ -349,6 +350,7 @@ export default function Layout() {
   );
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [profileForm, setProfileForm] = useState({ displayName: "", profilePhotoUrl: "", status: "" });
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
@@ -1381,6 +1383,14 @@ const visibleGroups = NAV_GROUPS
                 />
               </label>
 
+              <button
+                type="button"
+                onClick={() => setChangePasswordOpen(true)}
+                className="mt-5 inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
+              >
+                🔒 Change password
+              </button>
+
               {profileMessage && (
                 <div className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
                   {profileMessage}
@@ -1412,6 +1422,8 @@ const visibleGroups = NAV_GROUPS
           </div>
         </div>
       )}
+
+      <ChangePasswordModal open={changePasswordOpen} onClose={() => setChangePasswordOpen(false)} />
 
       {globalCallsEnabled && (
         <CallOverlay

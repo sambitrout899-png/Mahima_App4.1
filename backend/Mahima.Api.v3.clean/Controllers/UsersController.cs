@@ -1433,6 +1433,7 @@ Console.WriteLine(body.ToString());
         }
 
         // 🔹 BASIC
+        var username = Get(body, "Username", "username");
         var displayName = Get(body, "DisplayName", "displayName");
         var profilePhotoUrl = Get(body, "ProfilePhotoUrl", "profilePhotoUrl", "AvatarUrl", "avatarUrl", "PhotoUrl", "photoUrl");
         var email = Get(body, "Email", "email");
@@ -1467,6 +1468,7 @@ Console.WriteLine(body.ToString());
 
         var sql = @"
 UPDATE users SET
+    username = COALESCE(@Username, username),
     displayname = @DisplayName,
     profilephotourl = @ProfilePhotoUrl,
     email = @Email,
@@ -1495,6 +1497,7 @@ WHERE id = @Id AND tenant_id = @TenantId;
 
         await using var cmd = new NpgsqlCommand(sql, conn);
 
+        cmd.Parameters.AddWithValue("Username", NpgsqlTypes.NpgsqlDbType.Text, (object?)username ?? DBNull.Value);
         cmd.Parameters.AddWithValue("DisplayName", NpgsqlTypes.NpgsqlDbType.Text, (object?)displayName ?? DBNull.Value);
         cmd.Parameters.AddWithValue("ProfilePhotoUrl", NpgsqlTypes.NpgsqlDbType.Text, (object?)profilePhotoUrl ?? DBNull.Value);
         cmd.Parameters.AddWithValue("Email", NpgsqlTypes.NpgsqlDbType.Text, (object?)email ?? DBNull.Value);

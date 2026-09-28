@@ -1398,6 +1398,83 @@ WHERE id = @id", conn);
         return Guid.TryParse(raw, out var id) ? id : null;
     }
 
+    public class ChangePasswordDto
+    {
+        public string? CurrentPassword { get; set; }
+        public string? NewPassword { get; set; }
+    }
+
+    // Self-service password change for the currently signed-in user. Identity comes
+    // from the JWT, not a re-submitted username - unlike the separate forgot-password
+    // flow (reset-password / reset-password-direct), this always requires knowing the
+    // current password.
+    [HttpPost("change-password")]
+    [Authorize]
+    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordDto dto)
+    {
+        var userId = CurrentAuthUserId();
+        if (userId == null) return Unauthorized(new { message = "Not signed in." });
+
+        if (string.IsNullOrWhiteSpace(dto?.CurrentPassword))
+            return BadRequest(new { message = "Current password is required." });
+
+        if (!PasswordPolicy.IsStrong(dto?.NewPassword, out var policyError))
+            return BadRequest(new { message = policyError });
+
+        await using var conn = new NpgsqlConnection(_connStr);
+        await conn.OpenAsync();
+
+        string? storedHash;
+        string? username;
+        string? display;
+        string? role;
+        Guid? tenantId;
+
+        await using (var cmd = new NpgsqlCommand(
+            "SELECT passwordhash, username, displayname, role, tenant_id FROM public.users WHERE id = @id", conn))
+        {
+            cmd.Parameters.AddWithValue("id", NpgsqlTypes.NpgsqlDbType.Uuid, userId.Value);
+            await using var rdr = await cmd.ExecuteReaderAsync();
+            if (!await rdr.ReadAsync())
+                return NotFound(new { message = "Account not found." });
+
+            storedHash = rdr["passwordhash"]?.ToString();
+            username = rdr["username"]?.ToString();
+            display = rdr["displayname"]?.ToString();
+            role = rdr["role"]?.ToString() ?? "";
+            tenantId = rdr["tenant_id"] == DBNull.Value ? (Guid?)null : Guid.Parse(rdr["tenant_id"].ToString()!);
+        }
+
+        if (string.IsNullOrWhiteSpace(storedHash) ||
+            _pwHasher.VerifyHashedPassword(null, storedHash, dto!.CurrentPassword!) == PasswordVerificationResult.Failed)
+        {
+            return BadRequest(new { message = "Current password is incorrect." });
+        }
+
+        var newHash = _pwHasher.HashPassword(null, dto!.NewPassword!);
+        await using (var upd = new NpgsqlCommand("UPDATE public.users SET passwordhash = @h WHERE id = @id", conn))
+        {
+            upd.Parameters.AddWithValue("h", newHash);
+            upd.Parameters.AddWithValue("id", NpgsqlTypes.NpgsqlDbType.Uuid, userId.Value);
+            await upd.ExecuteNonQueryAsync();
+        }
+
+        var token = _jwtService.GenerateToken(
+            userId.Value, username ?? "", string.IsNullOrWhiteSpace(display) ? username ?? "" : display, role ?? "member", tenantId);
+
+        return Ok(new { message = "Password updated.", token });
+    }
+
+    // Returns a fresh cryptographically-random password meeting PasswordPolicy - used
+    // by the admin "Generate password" action and offered as a suggestion when a user
+    // changes their own password.
+    [HttpGet("generate-password")]
+    [Authorize]
+    public IActionResult GeneratePassword()
+    {
+        return Ok(new { password = PasswordPolicy.Generate() });
+    }
+
     // ============================
     // ?? PERMISSION LOADER
     // ============================
