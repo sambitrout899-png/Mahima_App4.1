@@ -3506,6 +3506,10 @@ th,
 @media (max-width: 600px) {
   .mahima-home-dashboard { gap: 22px; }
   .mahima-home-hero { min-height: 0; gap: 26px; padding: 25px 20px 21px; border-radius: 24px !important; }
+  /* The image-only hero has no in-flow text content to hold its height (the
+     image is absolutely positioned), so min-height: 0 above collapses it -
+     give it a real height back. */
+  .mahima-home-hero.mahima-home-hero-image-only { min-height: 200px; height: 200px; }
   .mahima-home-hero h1 { font-size: clamp(2rem, 10.5vw, 3rem) !important; }
   .mahima-home-lead { font-size: .9rem; line-height: 1.55; }
   .mahima-home-hero-actions { display: grid; grid-template-columns: 1fr; }
