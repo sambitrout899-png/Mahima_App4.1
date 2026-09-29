@@ -379,6 +379,12 @@ public class AppointmentLetterService : IAppointmentLetterService
             var prompt = BuildTranslationPrompt(languageName, missing);
             var answer = await CallAiAsync(prompt);
             var parsed = ParseTranslationMap(answer, missing);
+            if (parsed.Count == 0)
+            {
+                _logger.LogWarning(
+                    "Appointment letter translation for {Language} returned no usable entries out of {Count} requested. Raw AI answer: {Answer}",
+                    languageCode, missing.Count, answer ?? "(null)");
+            }
             foreach (var pair in parsed)
             {
                 result[pair.Key] = pair.Value;
