@@ -1702,12 +1702,11 @@ WHERE id = @Id AND tenant_id = @TenantId;
 
                 decimal? monthlyFixed = null;
                 decimal? hourlyRate = null;
-                decimal? allowances = null;
                 decimal? deductions = null;
                 int? weeklyOffDay = null;
 
                 await using (var cmd = new NpgsqlCommand(
-                    @"SELECT monthly_fixed_amount, hourly_rate, allowances, deductions, weekly_off_day
+                    @"SELECT monthly_fixed_amount, hourly_rate, deductions, weekly_off_day
                       FROM public.staff_payroll_settings
                       WHERE user_id = @userId AND tenant_id = @tenantId AND is_active = true
                       ORDER BY id DESC LIMIT 1", conn))
@@ -1719,7 +1718,6 @@ WHERE id = @Id AND tenant_id = @TenantId;
                     {
                         monthlyFixed = rdr["monthly_fixed_amount"] as decimal?;
                         hourlyRate = rdr["hourly_rate"] as decimal?;
-                        allowances = rdr["allowances"] as decimal?;
                         deductions = rdr["deductions"] as decimal?;
                         weeklyOffDay = rdr["weekly_off_day"] as int?;
                     }
@@ -1759,7 +1757,6 @@ WHERE id = @Id AND tenant_id = @TenantId;
                     AdditionalTerms = dto?.AdditionalTerms,
                     MonthlyFixedAmount = monthlyFixed,
                     HourlyRate = hourlyRate,
-                    Allowances = allowances,
                     Deductions = deductions,
                     WeeklyOffDay = weeklyOffDay,
                     SalaryType = dto?.SalaryType,

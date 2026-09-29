@@ -27,7 +27,6 @@ namespace Mahima.Api.v3.clean.Services
         // Pulled from StaffPayrollSettings for this user, if any.
         public decimal? MonthlyFixedAmount { get; set; }
         public decimal? HourlyRate { get; set; }
-        public decimal? Allowances { get; set; }
         public decimal? Deductions { get; set; }
         public int? WeeklyOffDay { get; set; }
 

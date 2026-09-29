@@ -197,14 +197,12 @@ public class AppointmentLetterService : IAppointmentLetterService
             rows.Add(("Monthly Fixed Amount", $"Rs. {request.MonthlyFixedAmount:N2}"));
         if (hasDaily)
             rows.Add(("Daily Rate", $"Rs. {request.HourlyRate:N2} per day"));
-        if (request.Allowances is > 0)
-            rows.Add(("Allowances", $"Rs. {request.Allowances:N2}"));
         if (request.Deductions is > 0)
             rows.Add(("Deductions", $"Rs. {request.Deductions:N2}"));
 
         if (hasMonthly)
         {
-            var net = request.MonthlyFixedAmount!.Value + (request.Allowances ?? 0) - (request.Deductions ?? 0);
+            var net = request.MonthlyFixedAmount!.Value - (request.Deductions ?? 0);
             rows.Add(("Net Monthly Compensation", $"Rs. {net:N2}"));
         }
 
