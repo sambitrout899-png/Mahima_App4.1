@@ -63,6 +63,12 @@ namespace Mahima.Api.v3.clean.Models
 
         public bool PayrollEnabled { get; set; } = false;
 
+        // Relative path (like "{tenantId}/AppointmentLetter_{userId}_....pdf") to the most
+        // recently generated appointment letter - never a public URL. See
+        // IAppointmentLetterService / UsersController's generate+download endpoints.
+        public string? AppointmentLetterUrl { get; set; }
+        public DateTime? AppointmentLetterGeneratedAtUtc { get; set; }
+
         public Tenant? Tenant { get; set; }
     }
 }

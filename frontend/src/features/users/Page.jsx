@@ -8,7 +8,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Copy,
+  Download,
   Edit3,
+  FileText,
   IdCard,
   KeyRound,
   Loader2,
@@ -160,6 +162,8 @@ function defaultForm() {
     isPastor: false,
     payrollEnabled: false,
     primaryPosition: "",
+    appointmentLetterUrl: "",
+    appointmentLetterGeneratedAtUtc: "",
   };
 }
 
@@ -557,6 +561,16 @@ export default function UsersPageCathedralAdvanced() {
   const [rolesLoading, setRolesLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [letterModalOpen, setLetterModalOpen] = useState(false);
+  const [letterForm, setLetterForm] = useState({
+    position: "",
+    department: "",
+    reportingManager: "",
+    appointmentDate: new Date().toISOString().slice(0, 10),
+    additionalTerms: "",
+  });
+  const [generatingLetter, setGeneratingLetter] = useState(false);
+  const [downloadingLetter, setDownloadingLetter] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [unblockingId, setUnblockingId] = useState(null);
   const [sending, setSending] = useState(false);
@@ -888,6 +902,8 @@ export default function UsersPageCathedralAdvanced() {
       isPastor: Boolean(user.isPastor ?? user.IsPastor),
       payrollEnabled: Boolean(user.payrollEnabled ?? user.PayrollEnabled ?? user.isPayrollEnabled ?? user.IsPayrollEnabled),
       primaryPosition: primaryPositionOfUser(user),
+      appointmentLetterUrl: user.appointmentLetterUrl ?? user.AppointmentLetterUrl ?? "",
+      appointmentLetterGeneratedAtUtc: user.appointmentLetterGeneratedAtUtc ?? user.AppointmentLetterGeneratedAtUtc ?? "",
     });
 
     setModalMessage("");
@@ -1084,6 +1100,74 @@ export default function UsersPageCathedralAdvanced() {
       setModalSuccess(false);
     } finally {
       setResetting(false);
+    }
+  };
+
+  const openLetterModal = () => {
+    const inferredPosition = (form.primaryPosition || "").replace(/\s*\([^)]*\)\s*$/, "").trim();
+    setLetterForm({
+      position: inferredPosition && inferredPosition !== "Not assigned" ? inferredPosition : "",
+      department: "",
+      reportingManager: "",
+      appointmentDate: new Date().toISOString().slice(0, 10),
+      additionalTerms: "",
+    });
+    setModalMessage("");
+    setModalSuccess(false);
+    setLetterModalOpen(true);
+  };
+
+  const generateAppointmentLetter = async (event) => {
+    event?.preventDefault?.();
+    if (!form.id) return;
+
+    setGeneratingLetter(true);
+    try {
+      const payload = {
+        Position: letterForm.position.trim() || null,
+        Department: letterForm.department.trim() || null,
+        ReportingManager: letterForm.reportingManager.trim() || null,
+        AppointmentDate: letterForm.appointmentDate ? new Date(letterForm.appointmentDate).toISOString() : null,
+        AdditionalTerms: letterForm.additionalTerms.trim() || null,
+      };
+      await api.post(`/users/${form.id}/appointment-letter`, payload);
+
+      setForm((prev) => ({
+        ...prev,
+        appointmentLetterUrl: "generated",
+        appointmentLetterGeneratedAtUtc: new Date().toISOString(),
+      }));
+      setLetterModalOpen(false);
+      setModalMessage("Appointment letter generated.");
+      setModalSuccess(true);
+    } catch (err) {
+      console.error("generateAppointmentLetter error:", err);
+      setModalMessage(apiErrorMessage(err, "Could not generate the appointment letter."));
+      setModalSuccess(false);
+    } finally {
+      setGeneratingLetter(false);
+    }
+  };
+
+  const downloadAppointmentLetter = async () => {
+    if (!form.id) return;
+    setDownloadingLetter(true);
+    try {
+      const response = await api.get(`/users/${form.id}/appointment-letter`, { responseType: "blob" });
+      const url = URL.createObjectURL(response.data);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `AppointmentLetter_${form.username || form.id}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      console.error("downloadAppointmentLetter error:", err);
+      setModalMessage(apiErrorMessage(err, "Could not download the appointment letter."));
+      setModalSuccess(false);
+    } finally {
+      setDownloadingLetter(false);
     }
   };
 
@@ -2588,6 +2672,28 @@ export default function UsersPageCathedralAdvanced() {
                     </label>
                   ))}
                 </div>
+
+                {form.payrollEnabled && (
+                  <div className="users-field users-field-full" style={{ marginTop: 12 }}>
+                    <label>{t("form.appointmentLetter") || "Appointment Letter"}</label>
+                    {!form.id ? (
+                      <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
+                        Save the user first to generate an appointment letter.
+                      </p>
+                    ) : (
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        <ActionButton icon={FileText} onClick={openLetterModal} loading={generatingLetter} variant="secondary">
+                          {form.appointmentLetterUrl ? "Regenerate Letter" : "Generate Appointment Letter"}
+                        </ActionButton>
+                        {form.appointmentLetterUrl && (
+                          <ActionButton icon={Download} onClick={downloadAppointmentLetter} loading={downloadingLetter} variant="secondary">
+                            Download
+                          </ActionButton>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {modalMessage && (
@@ -2622,6 +2728,79 @@ export default function UsersPageCathedralAdvanced() {
               </ActionButton>
             </div>
           </form>
+        </div>
+      )}
+
+      {letterModalOpen && (
+        <div
+          className="users-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          onClick={(event) => {
+            if (event.target.classList.contains("users-modal-backdrop")) setLetterModalOpen(false);
+          }}
+        >
+          <div className="users-modal" style={{ maxWidth: 480 }}>
+            <form onSubmit={generateAppointmentLetter}>
+              <div className="users-modal-header">
+                <h2 className="users-modal-title">Generate Appointment Letter</h2>
+                <IconButton icon={X} label={t("common.close")} onClick={() => setLetterModalOpen(false)} variant="neutral" />
+              </div>
+
+              <div className="users-modal-body">
+                <div className="users-field users-field-full">
+                  <label>Position / Designation</label>
+                  <input
+                    type="text"
+                    value={letterForm.position}
+                    onChange={(event) => setLetterForm((prev) => ({ ...prev, position: event.target.value }))}
+                    placeholder="e.g. Youth Pastor"
+                  />
+                </div>
+                <div className="users-field users-field-full">
+                  <label>Department</label>
+                  <input
+                    type="text"
+                    value={letterForm.department}
+                    onChange={(event) => setLetterForm((prev) => ({ ...prev, department: event.target.value }))}
+                  />
+                </div>
+                <div className="users-field users-field-full">
+                  <label>Reporting Manager</label>
+                  <input
+                    type="text"
+                    value={letterForm.reportingManager}
+                    onChange={(event) => setLetterForm((prev) => ({ ...prev, reportingManager: event.target.value }))}
+                  />
+                </div>
+                <div className="users-field users-field-full">
+                  <label>Appointment Date</label>
+                  <input
+                    type="date"
+                    value={letterForm.appointmentDate}
+                    onChange={(event) => setLetterForm((prev) => ({ ...prev, appointmentDate: event.target.value }))}
+                  />
+                </div>
+                <div className="users-field users-field-full">
+                  <label>Additional Terms (optional)</label>
+                  <textarea
+                    className="users-textarea"
+                    value={letterForm.additionalTerms}
+                    onChange={(event) => setLetterForm((prev) => ({ ...prev, additionalTerms: event.target.value }))}
+                  />
+                </div>
+              </div>
+
+              <div className="users-modal-footer">
+                <ActionButton icon={X} onClick={() => setLetterModalOpen(false)} disabled={generatingLetter} variant="secondary">
+                  {t("common.cancel")}
+                </ActionButton>
+                <ActionButton icon={FileText} type="submit" loading={generatingLetter}>
+                  Generate
+                </ActionButton>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 

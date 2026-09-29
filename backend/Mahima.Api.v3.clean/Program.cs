@@ -162,6 +162,7 @@ builder.Services.AddSingleton<IEmailService, SmtpEmailService>();
 builder.Services.AddSingleton<IMarketingEmailService, MarketingSmtpEmailService>();
 builder.Services.AddScoped<IMobilePushNotificationService, MobilePushNotificationService>();
 builder.Services.AddScoped<IBaptismCertificateService, BaptismCertificateService>();
+builder.Services.AddScoped<IAppointmentLetterService, AppointmentLetterService>();
 builder.Services.AddScoped<ITenantPrintTemplateService, TenantPrintTemplateService>();
 builder.Services.AddScoped<IMarriageService, MarriageService>();
 builder.Services.AddScoped<ICounsellingService, CounsellingService>();

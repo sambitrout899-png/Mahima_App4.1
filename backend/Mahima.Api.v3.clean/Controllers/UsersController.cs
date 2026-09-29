@@ -25,23 +25,28 @@ namespace Mahima.Api.v3.clean.Controllers
     public class UsersController : ControllerBase
     {
         private readonly string? _connectionString;
+        private readonly IConfiguration _configuration;
         private readonly ILogger<UsersController> _logger;
         private readonly IHostEnvironment _env;
         private readonly IPastorBotService _pastorBot;
         private readonly IHubContext<ChatHub> _chatHub;
+        private readonly IAppointmentLetterService _appointmentLetters;
 
         public UsersController(
             IConfiguration configuration,
             ILogger<UsersController> logger,
             IHostEnvironment env,
             IPastorBotService pastorBot,
-            IHubContext<ChatHub> chatHub)
+            IHubContext<ChatHub> chatHub,
+            IAppointmentLetterService appointmentLetters)
         {
             _connectionString = configuration.GetConnectionString("DefaultConnection");
+            _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _env = env ?? throw new ArgumentNullException(nameof(env));
             _pastorBot = pastorBot ?? throw new ArgumentNullException(nameof(pastorBot));
             _chatHub = chatHub ?? throw new ArgumentNullException(nameof(chatHub));
+            _appointmentLetters = appointmentLetters ?? throw new ArgumentNullException(nameof(appointmentLetters));
         }
 
         private async Task SendNewUserWelcomeAsync(Guid userId, string? displayName)
@@ -1534,5 +1539,154 @@ WHERE id = @Id AND tenant_id = @TenantId;
         return StatusCode(500, ex.Message);
     }
 }
+
+        public class AppointmentLetterRequestDto
+        {
+            public string? Position { get; set; }
+            public string? Department { get; set; }
+            public string? ReportingManager { get; set; }
+            public DateTime? AppointmentDate { get; set; }
+            public string? AdditionalTerms { get; set; }
+        }
+
+        // POST /api/users/{id}/appointment-letter - generates a fresh appointment letter PDF
+        // for a payroll-enabled user from their own record + this tenant's active payroll
+        // settings for them, and attaches it (records the path + timestamp against the user).
+        [HttpPost("{id}/appointment-letter")]
+        [Authorize(Roles = "admin,staff")]
+        public async Task<IActionResult> GenerateAppointmentLetter(string id, [FromBody] AppointmentLetterRequestDto? dto)
+        {
+            if (string.IsNullOrWhiteSpace(_connectionString))
+                return StatusCode(500, "Missing connection string.");
+            if (!Guid.TryParse(id, out var userId))
+                return BadRequest("Invalid user id.");
+
+            var tenantId = GetCurrentTenantId();
+
+            try
+            {
+                await using var conn = new NpgsqlConnection(_connectionString);
+                await conn.OpenAsync();
+
+                string? fullName;
+                string? userCode;
+                DateTime joinDate;
+                bool payrollEnabled;
+
+                await using (var cmd = new NpgsqlCommand(
+                    "SELECT displayname, usercode, joindate, payrollenabled FROM public.users WHERE id = @id AND tenant_id = @tenantId", conn))
+                {
+                    cmd.Parameters.AddWithValue("id", NpgsqlTypes.NpgsqlDbType.Uuid, userId);
+                    cmd.Parameters.AddWithValue("tenantId", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
+                    await using var rdr = await cmd.ExecuteReaderAsync();
+                    if (!await rdr.ReadAsync()) return NotFound("User not found.");
+                    fullName = rdr["displayname"] as string;
+                    userCode = rdr["usercode"] as string;
+                    joinDate = rdr["joindate"] is DateTime jd ? jd : DateTime.UtcNow;
+                    payrollEnabled = rdr["payrollenabled"] is bool pe && pe;
+                }
+
+                if (!payrollEnabled)
+                    return BadRequest(new { message = "Appointment letters can only be generated for payroll-enabled users." });
+
+                if (string.IsNullOrWhiteSpace(fullName))
+                    return BadRequest(new { message = "This user has no display name set." });
+
+                decimal? monthlyFixed = null;
+                decimal? hourlyRate = null;
+                decimal? allowances = null;
+
+                await using (var cmd = new NpgsqlCommand(
+                    @"SELECT monthly_fixed_amount, hourly_rate, allowances FROM public.staff_payroll_settings
+                      WHERE user_id = @userId AND tenant_id = @tenantId AND is_active = true
+                      ORDER BY id DESC LIMIT 1", conn))
+                {
+                    cmd.Parameters.AddWithValue("userId", userId.ToString());
+                    cmd.Parameters.AddWithValue("tenantId", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
+                    await using var rdr = await cmd.ExecuteReaderAsync();
+                    if (await rdr.ReadAsync())
+                    {
+                        monthlyFixed = rdr["monthly_fixed_amount"] as decimal?;
+                        hourlyRate = rdr["hourly_rate"] as decimal?;
+                        allowances = rdr["allowances"] as decimal?;
+                    }
+                }
+
+                var relativePath = await _appointmentLetters.GenerateAsync(new AppointmentLetterRequest
+                {
+                    TenantId = tenantId,
+                    UserId = userId,
+                    FullName = fullName!,
+                    UserCode = userCode,
+                    JoinDate = joinDate,
+                    Position = dto?.Position,
+                    Department = dto?.Department,
+                    ReportingManager = dto?.ReportingManager,
+                    AppointmentDate = dto?.AppointmentDate ?? DateTime.UtcNow,
+                    AdditionalTerms = dto?.AdditionalTerms,
+                    MonthlyFixedAmount = monthlyFixed,
+                    HourlyRate = hourlyRate,
+                    Allowances = allowances,
+                });
+
+                await using (var cmd = new NpgsqlCommand(
+                    @"UPDATE public.users SET appointment_letter_url = @url, appointment_letter_generated_at_utc = now()
+                      WHERE id = @id AND tenant_id = @tenantId", conn))
+                {
+                    cmd.Parameters.AddWithValue("url", relativePath);
+                    cmd.Parameters.AddWithValue("id", NpgsqlTypes.NpgsqlDbType.Uuid, userId);
+                    cmd.Parameters.AddWithValue("tenantId", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                _logger.LogInformation("Appointment letter generated for user {UserId}", userId);
+                return Ok(new { generated = true, downloadUrl = $"/api/users/{userId}/appointment-letter" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Appointment letter generation failed for user {UserId}", userId);
+                return StatusCode(500, "Could not generate the appointment letter.");
+            }
+        }
+
+        // GET /api/users/{id}/appointment-letter - streams the most recently generated PDF.
+        // Admin/staff only: this document may contain salary details.
+        [HttpGet("{id}/appointment-letter")]
+        [Authorize(Roles = "admin,staff")]
+        public async Task<IActionResult> DownloadAppointmentLetter(string id)
+        {
+            if (string.IsNullOrWhiteSpace(_connectionString))
+                return StatusCode(500, "Missing connection string.");
+            if (!Guid.TryParse(id, out var userId))
+                return BadRequest("Invalid user id.");
+
+            var tenantId = GetCurrentTenantId();
+
+            await using var conn = new NpgsqlConnection(_connectionString);
+            await conn.OpenAsync();
+
+            string? relativePath;
+            await using (var cmd = new NpgsqlCommand(
+                "SELECT appointment_letter_url FROM public.users WHERE id = @id AND tenant_id = @tenantId", conn))
+            {
+                cmd.Parameters.AddWithValue("id", NpgsqlTypes.NpgsqlDbType.Uuid, userId);
+                cmd.Parameters.AddWithValue("tenantId", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
+                relativePath = (await cmd.ExecuteScalarAsync()) as string;
+            }
+
+            if (string.IsNullOrWhiteSpace(relativePath))
+                return NotFound("No appointment letter has been generated for this user yet.");
+
+            var letterRoot = System.IO.Path.GetFullPath(
+                _configuration["AppointmentLetters:GeneratedRoot"]
+                ?? System.IO.Path.Combine(_env.ContentRootPath, "App_Data", "appointment-letters"));
+            var fullPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(letterRoot, relativePath));
+
+            if (!fullPath.StartsWith(letterRoot, StringComparison.OrdinalIgnoreCase) || !System.IO.File.Exists(fullPath))
+                return NotFound("Appointment letter file could not be found on the server.");
+
+            var bytes = await System.IO.File.ReadAllBytesAsync(fullPath);
+            return File(bytes, "application/pdf", System.IO.Path.GetFileName(fullPath));
+        }
     }
 }
