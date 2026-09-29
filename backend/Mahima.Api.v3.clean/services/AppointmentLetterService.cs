@@ -171,17 +171,17 @@ public class AppointmentLetterService : IAppointmentLetterService
     {
         var rows = new List<(string, string)>();
         var hasMonthly = request.MonthlyFixedAmount is > 0;
-        var hasHourly = request.HourlyRate is > 0;
+        var hasDaily = request.HourlyRate is > 0;
 
-        if (!hasMonthly && !hasHourly)
+        if (!hasMonthly && !hasDaily)
             return rows;
 
-        rows.Add(("Salary Type", hasMonthly ? "Monthly Fixed" : "Hourly"));
+        rows.Add(("Salary Type", hasMonthly ? "Monthly Fixed" : "Daily"));
 
         if (hasMonthly)
             rows.Add(("Monthly Fixed Amount", $"Rs. {request.MonthlyFixedAmount:N2}"));
-        if (hasHourly)
-            rows.Add(("Hourly Rate", $"Rs. {request.HourlyRate:N2} per hour"));
+        if (hasDaily)
+            rows.Add(("Daily Rate", $"Rs. {request.HourlyRate:N2} per day"));
         if (request.Allowances is > 0)
             rows.Add(("Allowances", $"Rs. {request.Allowances:N2}"));
         if (request.Deductions is > 0)
