@@ -1651,9 +1651,60 @@ WHERE id = @Id AND tenant_id = @TenantId;
             }
         }
 
-        // POST /api/users/{id}/appointment-letter - generates a fresh appointment letter PDF
-        // for a payroll-enabled user from their own record + this tenant's active payroll
-        // settings for them, and attaches it (records the path + timestamp against the user).
+        // GET /api/users/{id}/appointment-letter/details - the stored, editable appointment
+        // letter record for this user (department, reporting manager, appointment date,
+        // additional terms, salary type), if one has ever been saved. Lets the "Generate
+        // Appointment Letter" modal re-open pre-filled with what was last entered, instead
+        // of resetting to blank every time.
+        [HttpGet("{id}/appointment-letter/details")]
+        [Authorize(Roles = "admin,staff")]
+        public async Task<IActionResult> GetAppointmentLetterDetails(string id)
+        {
+            if (string.IsNullOrWhiteSpace(_connectionString))
+                return StatusCode(500, "Missing connection string.");
+            if (!Guid.TryParse(id, out var userId))
+                return BadRequest("Invalid user id.");
+
+            var tenantId = GetCurrentTenantId();
+
+            try
+            {
+                await using var conn = new NpgsqlConnection(_connectionString);
+                await conn.OpenAsync();
+
+                await using var cmd = new NpgsqlCommand(
+                    @"SELECT department, reporting_manager_user_id, appointment_date, additional_terms,
+                             salary_type, pdf_url, generated_at_utc
+                      FROM public.appointment_letters
+                      WHERE tenant_id = @tenantId AND user_id = @userId", conn);
+                cmd.Parameters.AddWithValue("tenantId", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
+                cmd.Parameters.AddWithValue("userId", NpgsqlTypes.NpgsqlDbType.Uuid, userId);
+                await using var rdr = await cmd.ExecuteReaderAsync();
+                if (!await rdr.ReadAsync())
+                    return Ok(new { exists = false });
+
+                return Ok(new
+                {
+                    exists = true,
+                    department = rdr["department"] as string,
+                    reportingManagerUserId = rdr["reporting_manager_user_id"] as Guid?,
+                    appointmentDate = rdr["appointment_date"] as DateTime?,
+                    additionalTerms = rdr["additional_terms"] as string,
+                    salaryType = rdr["salary_type"] as string,
+                    hasPdf = rdr["pdf_url"] != DBNull.Value,
+                    generatedAtUtc = rdr["generated_at_utc"] as DateTime?
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to load appointment letter details for user {UserId}", userId);
+                return StatusCode(500, "Could not load appointment letter details.");
+            }
+        }
+
+        // POST /api/users/{id}/appointment-letter - stores the submitted letter fields as an
+        // editable record (see GetAppointmentLetterDetails), then generates a fresh PDF from
+        // that same record for a payroll-enabled user, and attaches the PDF to it.
         [HttpPost("{id}/appointment-letter")]
         [Authorize(Roles = "admin,staff")]
         public async Task<IActionResult> GenerateAppointmentLetter(string id, [FromBody] AppointmentLetterRequestDto? dto)
@@ -1730,6 +1781,31 @@ WHERE id = @Id AND tenant_id = @TenantId;
                     }
                 }
 
+                // Store the submitted letter fields as an editable record BEFORE generating the
+                // PDF, so the data survives independent of any single PDF render and can be
+                // re-opened/edited later (see GetAppointmentLetterDetails).
+                await using (var cmd = new NpgsqlCommand(
+                    @"INSERT INTO public.appointment_letters
+                        (tenant_id, user_id, department, reporting_manager_user_id, appointment_date, additional_terms, salary_type, created_at_utc, updated_at_utc)
+                      VALUES (@tenantId, @userId, @department, @reportingManagerUserId, @appointmentDate, @additionalTerms, @salaryType, now(), now())
+                      ON CONFLICT (tenant_id, user_id) DO UPDATE SET
+                        department = EXCLUDED.department,
+                        reporting_manager_user_id = EXCLUDED.reporting_manager_user_id,
+                        appointment_date = EXCLUDED.appointment_date,
+                        additional_terms = EXCLUDED.additional_terms,
+                        salary_type = EXCLUDED.salary_type,
+                        updated_at_utc = now()", conn))
+                {
+                    cmd.Parameters.AddWithValue("tenantId", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
+                    cmd.Parameters.AddWithValue("userId", NpgsqlTypes.NpgsqlDbType.Uuid, userId);
+                    cmd.Parameters.AddWithValue("department", NpgsqlTypes.NpgsqlDbType.Text, (object?)dto?.Department ?? DBNull.Value);
+                    cmd.Parameters.AddWithValue("reportingManagerUserId", NpgsqlTypes.NpgsqlDbType.Uuid, (object?)dto?.ReportingManagerUserId ?? DBNull.Value);
+                    cmd.Parameters.AddWithValue("appointmentDate", NpgsqlTypes.NpgsqlDbType.TimestampTz, (object?)dto?.AppointmentDate ?? DBNull.Value);
+                    cmd.Parameters.AddWithValue("additionalTerms", NpgsqlTypes.NpgsqlDbType.Text, (object?)dto?.AdditionalTerms ?? DBNull.Value);
+                    cmd.Parameters.AddWithValue("salaryType", NpgsqlTypes.NpgsqlDbType.Text, (object?)dto?.SalaryType ?? DBNull.Value);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
                 string? reportingManagerName = null;
                 if (dto?.ReportingManagerUserId is Guid managerId && managerId != Guid.Empty)
                 {
@@ -1778,6 +1854,17 @@ WHERE id = @Id AND tenant_id = @TenantId;
                     cmd.Parameters.AddWithValue("url", relativePath);
                     cmd.Parameters.AddWithValue("id", NpgsqlTypes.NpgsqlDbType.Uuid, userId);
                     cmd.Parameters.AddWithValue("tenantId", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                // The PDF is attached to the same editable record its input data was just saved to.
+                await using (var cmd = new NpgsqlCommand(
+                    @"UPDATE public.appointment_letters SET pdf_url = @url, generated_at_utc = now(), updated_at_utc = now()
+                      WHERE tenant_id = @tenantId AND user_id = @userId", conn))
+                {
+                    cmd.Parameters.AddWithValue("url", relativePath);
+                    cmd.Parameters.AddWithValue("tenantId", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
+                    cmd.Parameters.AddWithValue("userId", NpgsqlTypes.NpgsqlDbType.Uuid, userId);
                     await cmd.ExecuteNonQueryAsync();
                 }
 

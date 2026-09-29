@@ -1122,11 +1122,27 @@ export default function UsersPageCathedralAdvanced() {
     if (!form.id) return;
     setLoadingCandidates(true);
     try {
-      const resp = await api.get(`/users/${form.id}/reporting-candidates`);
-      setReportingCandidates(resp?.data?.items || []);
-      setReportingCandidatesReason(resp?.data?.reason || null);
+      const [candidatesResp, detailsResp] = await Promise.all([
+        api.get(`/users/${form.id}/reporting-candidates`),
+        api.get(`/users/${form.id}/appointment-letter/details`),
+      ]);
+      setReportingCandidates(candidatesResp?.data?.items || []);
+      setReportingCandidatesReason(candidatesResp?.data?.reason || null);
+
+      const details = detailsResp?.data;
+      if (details?.exists) {
+        setLetterForm({
+          department: details.department || "",
+          reportingManagerUserId: details.reportingManagerUserId || "",
+          appointmentDate: details.appointmentDate
+            ? new Date(details.appointmentDate).toISOString().slice(0, 10)
+            : new Date().toISOString().slice(0, 10),
+          additionalTerms: details.additionalTerms || "",
+          salaryType: details.salaryType || "Monthly",
+        });
+      }
     } catch (err) {
-      console.warn("fetchReportingCandidates error:", err);
+      console.warn("fetchReportingCandidates/details error:", err);
       setReportingCandidates([]);
       setReportingCandidatesReason("error");
     } finally {
