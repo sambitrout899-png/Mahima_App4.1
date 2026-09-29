@@ -116,6 +116,18 @@ public class AppointmentLetterService : IAppointmentLetterService
             : new Dictionary<string, string>(StringComparer.Ordinal);
         string T(string text) => translations.TryGetValue(text, out var translated) && !string.IsNullOrWhiteSpace(translated) ? translated : text;
 
+        // QuestPDF bundles its own private Skia build - it does NOT fall back to whatever
+        // fonts happen to be installed on the OS. Devanagari/Gurmukhi glyphs render as
+        // tofu boxes unless we explicitly register a font that has them and point the
+        // page at it by name.
+        var scriptFontFamily = languageCode switch
+        {
+            "hi" => "Noto Sans Devanagari",
+            "pa" => "Noto Sans Gurmukhi",
+            _ => null,
+        };
+        if (scriptFontFamily != null) EnsureScriptFontsRegistered();
+
         var (introBeforeRole, introAfterRole) = SplitOnFirstPlaceholder(T(IntroTemplate), orgName, joinDate);
         var translatedAdditionalTerms = !string.IsNullOrWhiteSpace(request.AdditionalTerms) ? T(request.AdditionalTerms!) : null;
 
@@ -128,7 +140,11 @@ public class AppointmentLetterService : IAppointmentLetterService
                 page.Size(PageSizes.A4);
                 page.Margin(36);
                 page.PageColor(Colors.White);
-                page.DefaultTextStyle(style => style.FontSize(10.5f).FontColor("#1E293B").LineHeight(1.4f));
+                page.DefaultTextStyle(style =>
+                {
+                    var s = style.FontSize(10.5f).FontColor("#1E293B").LineHeight(1.4f);
+                    return scriptFontFamily != null ? s.FontFamily(scriptFontFamily) : s;
+                });
 
                 page.Header().Column(col =>
                 {
@@ -379,6 +395,44 @@ public class AppointmentLetterService : IAppointmentLetterService
     }
 
     private static string CacheKey(string languageCode, string text) => $"appointment-letter-translation:{languageCode}:{text}";
+
+    private static readonly object ScriptFontLock = new();
+    private static bool _scriptFontsRegistered;
+
+    // Registers the Devanagari/Gurmukhi fonts installed on the server (apt package
+    // fonts-noto-core/-unhinted/-extra) with QuestPDF's own font manager, once per
+    // process. Best-effort: if a path doesn't exist (e.g. running locally on Windows,
+    // or the package layout changes), that language's PDF just falls back to whatever
+    // the default font can draw instead of throwing.
+    private static void EnsureScriptFontsRegistered()
+    {
+        if (_scriptFontsRegistered) return;
+        lock (ScriptFontLock)
+        {
+            if (_scriptFontsRegistered) return;
+            var candidatePaths = new[]
+            {
+                "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSansGurmukhi-Regular.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSansGurmukhi-Bold.ttf",
+            };
+            foreach (var path in candidatePaths)
+            {
+                try
+                {
+                    if (!File.Exists(path)) continue;
+                    using var stream = File.OpenRead(path);
+                    QuestPDF.Drawing.FontManager.RegisterFont(stream);
+                }
+                catch
+                {
+                    // Ignored - best-effort registration, see method summary.
+                }
+            }
+            _scriptFontsRegistered = true;
+        }
+    }
 
     private static string BuildTranslationPrompt(string languageName, IReadOnlyList<string> texts)
     {
