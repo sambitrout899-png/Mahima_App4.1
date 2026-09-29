@@ -30,6 +30,9 @@ namespace Mahima.Api.v3.clean.Services
         public decimal? Allowances { get; set; }
         public decimal? Deductions { get; set; }
         public int? WeeklyOffDay { get; set; }
+
+        // Admin-selected label for the compensation section: "Daily", "Weekly" or "Monthly".
+        public string? SalaryType { get; set; }
     }
 
     public interface IAppointmentLetterService

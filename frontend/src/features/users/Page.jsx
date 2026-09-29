@@ -1111,6 +1111,7 @@ export default function UsersPageCathedralAdvanced() {
       reportingManagerUserId: "",
       appointmentDate: new Date().toISOString().slice(0, 10),
       additionalTerms: "",
+      salaryType: "Monthly",
     });
     setModalMessage("");
     setModalSuccess(false);
@@ -1144,6 +1145,7 @@ export default function UsersPageCathedralAdvanced() {
         ReportingManagerUserId: letterForm.reportingManagerUserId || null,
         AppointmentDate: letterForm.appointmentDate ? new Date(letterForm.appointmentDate).toISOString() : null,
         AdditionalTerms: letterForm.additionalTerms.trim() || null,
+        SalaryType: letterForm.salaryType || null,
       };
       await api.post(`/users/${form.id}/appointment-letter`, payload);
 
@@ -2813,6 +2815,17 @@ export default function UsersPageCathedralAdvanced() {
                   <p style={{ margin: "4px 0 0", fontSize: 12, color: "#6b7280" }}>
                     Based on the Positions hierarchy: whoever holds the position above this user's.
                   </p>
+                </div>
+                <div className="users-field users-field-full">
+                  <label>Salary Type</label>
+                  <select
+                    value={letterForm.salaryType}
+                    onChange={(event) => setLetterForm((prev) => ({ ...prev, salaryType: event.target.value }))}
+                  >
+                    <option value="Daily">Daily</option>
+                    <option value="Weekly">Weekly</option>
+                    <option value="Monthly">Monthly</option>
+                  </select>
                 </div>
                 <div className="users-field users-field-full">
                   <label>Appointment Date</label>

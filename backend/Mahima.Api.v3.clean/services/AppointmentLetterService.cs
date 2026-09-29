@@ -188,7 +188,10 @@ public class AppointmentLetterService : IAppointmentLetterService
         if (!hasMonthly && !hasDaily)
             return rows;
 
-        rows.Add(("Salary Type", hasMonthly ? "Monthly Fixed" : "Daily"));
+        var salaryType = request.SalaryType is "Daily" or "Weekly" or "Monthly"
+            ? request.SalaryType
+            : (hasMonthly ? "Monthly" : "Daily");
+        rows.Add(("Salary Type", salaryType));
 
         if (hasMonthly)
             rows.Add(("Monthly Fixed Amount", $"Rs. {request.MonthlyFixedAmount:N2}"));

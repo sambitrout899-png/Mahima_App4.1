@@ -1546,6 +1546,10 @@ WHERE id = @Id AND tenant_id = @TenantId;
             public Guid? ReportingManagerUserId { get; set; }
             public DateTime? AppointmentDate { get; set; }
             public string? AdditionalTerms { get; set; }
+
+            // "Daily", "Weekly" or "Monthly" - how the admin wants the compensation
+            // section labeled on the letter. Defaults to "Monthly" if not sent.
+            public string? SalaryType { get; set; }
         }
 
         // GET /api/users/{id}/reporting-candidates - who this user could report to, based on
@@ -1594,29 +1598,48 @@ WHERE id = @Id AND tenant_id = @TenantId;
                 if (parentPositionId == null)
                     return Ok(new { items = Array.Empty<object>(), reason = "top_level" });
 
+                // Walk up the position hierarchy: if the immediate parent position has no one
+                // assigned, keep climbing to the next ancestor until we find one that does (or
+                // run out of hierarchy). This is what "who does this user report to" should mean
+                // in an org chart where a level can be temporarily vacant.
                 var candidates = new List<object>();
-                await using (var cmd = new NpgsqlCommand(
-                    @"SELECT u.id, COALESCE(u.displayname, u.username), p.name
-                      FROM public.user_positions up
-                      JOIN public.positions p ON p.id = up.position_id
-                      JOIN public.users u ON u.id = up.user_id
-                      WHERE up.position_id = @parentPositionId AND p.tenant_id = @tenantId
-                        AND u.tenant_id = @tenantId AND u.id <> @userId
-                      ORDER BY up.is_primary DESC, COALESCE(u.displayname, u.username)", conn))
+                var currentPositionId = parentPositionId;
+                var visited = new HashSet<long>();
+
+                while (currentPositionId.HasValue && visited.Add(currentPositionId.Value))
                 {
-                    cmd.Parameters.AddWithValue("parentPositionId", NpgsqlTypes.NpgsqlDbType.Bigint, parentPositionId.Value);
-                    cmd.Parameters.AddWithValue("tenantId", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
-                    cmd.Parameters.AddWithValue("userId", NpgsqlTypes.NpgsqlDbType.Uuid, userId);
-                    await using var rdr = await cmd.ExecuteReaderAsync();
-                    while (await rdr.ReadAsync())
+                    await using (var cmd = new NpgsqlCommand(
+                        @"SELECT u.id, COALESCE(u.displayname, u.username), p.name
+                          FROM public.user_positions up
+                          JOIN public.positions p ON p.id = up.position_id
+                          JOIN public.users u ON u.id = up.user_id
+                          WHERE up.position_id = @positionId AND p.tenant_id = @tenantId
+                            AND u.tenant_id = @tenantId AND u.id <> @userId
+                          ORDER BY up.is_primary DESC, COALESCE(u.displayname, u.username)", conn))
                     {
-                        candidates.Add(new
+                        cmd.Parameters.AddWithValue("positionId", NpgsqlTypes.NpgsqlDbType.Bigint, currentPositionId.Value);
+                        cmd.Parameters.AddWithValue("tenantId", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
+                        cmd.Parameters.AddWithValue("userId", NpgsqlTypes.NpgsqlDbType.Uuid, userId);
+                        await using var rdr = await cmd.ExecuteReaderAsync();
+                        while (await rdr.ReadAsync())
                         {
-                            userId = rdr.GetGuid(0),
-                            displayName = rdr.GetString(1),
-                            positionName = rdr.GetString(2)
-                        });
+                            candidates.Add(new
+                            {
+                                userId = rdr.GetGuid(0),
+                                displayName = rdr.GetString(1),
+                                positionName = rdr.GetString(2)
+                            });
+                        }
                     }
+
+                    if (candidates.Count > 0) break;
+
+                    await using var parentCmd = new NpgsqlCommand(
+                        "SELECT parent_position_id FROM public.positions WHERE id = @positionId AND tenant_id = @tenantId", conn);
+                    parentCmd.Parameters.AddWithValue("positionId", NpgsqlTypes.NpgsqlDbType.Bigint, currentPositionId.Value);
+                    parentCmd.Parameters.AddWithValue("tenantId", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
+                    var next = await parentCmd.ExecuteScalarAsync();
+                    currentPositionId = next is long l ? l : (long?)null;
                 }
 
                 return Ok(new { items = candidates, reason = candidates.Count == 0 ? "no_holder" : null });
@@ -1739,6 +1762,7 @@ WHERE id = @Id AND tenant_id = @TenantId;
                     Allowances = allowances,
                     Deductions = deductions,
                     WeeklyOffDay = weeklyOffDay,
+                    SalaryType = dto?.SalaryType,
                 });
 
                 await using (var cmd = new NpgsqlCommand(
