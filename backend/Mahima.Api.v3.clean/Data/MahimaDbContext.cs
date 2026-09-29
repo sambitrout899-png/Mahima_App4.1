@@ -95,6 +95,7 @@ namespace Mahima.Api.v3.clean.Data
 
         public DbSet<EventItem> Events => Set<EventItem>();
         public DbSet<EventRsvp> EventRsvps => Set<EventRsvp>();
+        public DbSet<EventAttachment> EventAttachments => Set<EventAttachment>();
         public DbSet<ChildCheckIn> ChildCheckIns => Set<ChildCheckIn>();
         public DbSet<VolunteerShift> VolunteerShifts => Set<VolunteerShift>();
         public DbSet<VolunteerSignup> VolunteerSignups => Set<VolunteerSignup>();
@@ -462,6 +463,22 @@ namespace Mahima.Api.v3.clean.Data
                 eb.Property(r => r.Status).HasColumnName("status").HasMaxLength(20).HasDefaultValue("confirmed");
                 eb.Property(r => r.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
                 eb.HasIndex(r => new { r.EventId, r.Status });
+            });
+
+            modelBuilder.Entity<EventAttachment>(eb =>
+            {
+                eb.ToTable("event_attachments", "public");
+                eb.HasKey(a => a.Id);
+                eb.Property(a => a.Id).HasColumnName("id");
+                eb.Property(a => a.TenantId).HasColumnName("tenant_id");
+                eb.Property(a => a.EventId).HasColumnName("event_id");
+                eb.Property(a => a.FileName).HasColumnName("file_name").HasMaxLength(260).IsRequired();
+                eb.Property(a => a.FileUrl).HasColumnName("file_url").IsRequired();
+                eb.Property(a => a.ContentType).HasColumnName("content_type").HasMaxLength(120).IsRequired();
+                eb.Property(a => a.FileSizeBytes).HasColumnName("file_size_bytes");
+                eb.Property(a => a.UploadedByUserId).HasColumnName("uploaded_by_user_id");
+                eb.Property(a => a.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
+                eb.HasIndex(a => a.EventId);
             });
 
             modelBuilder.Entity<ChildCheckIn>(eb =>

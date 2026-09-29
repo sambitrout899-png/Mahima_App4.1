@@ -123,7 +123,7 @@ namespace Mahima.Api.v3.clean.Controllers
                 }
             }
 
-            var allowedPurposes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "chat", "branding" };
+            var allowedPurposes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "chat", "branding", "events" };
             var folderSegment = allowedPurposes.Contains(purpose?.Trim() ?? "") ? purpose!.Trim().ToLowerInvariant() : "chat";
             var relativeFolder = Path.Combine("tenants", GetCurrentTenantId().ToString("N"), folderSegment, DateTime.UtcNow.ToString("yyyy"), DateTime.UtcNow.ToString("MM"));
             var targetFolder = Path.Combine(uploadRoot, relativeFolder);
