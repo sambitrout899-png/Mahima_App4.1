@@ -1574,14 +1574,14 @@ WHERE id = @Id AND tenant_id = @TenantId;
                 bool payrollEnabled;
 
                 await using (var cmd = new NpgsqlCommand(
-                    "SELECT displayname, usercode, joindate, payrollenabled FROM public.users WHERE id = @id AND tenant_id = @tenantId", conn))
+                    "SELECT displayname, \"UserCode\", joindate, payrollenabled FROM public.users WHERE id = @id AND tenant_id = @tenantId", conn))
                 {
                     cmd.Parameters.AddWithValue("id", NpgsqlTypes.NpgsqlDbType.Uuid, userId);
                     cmd.Parameters.AddWithValue("tenantId", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
                     await using var rdr = await cmd.ExecuteReaderAsync();
                     if (!await rdr.ReadAsync()) return NotFound("User not found.");
                     fullName = rdr["displayname"] as string;
-                    userCode = rdr["usercode"] as string;
+                    userCode = rdr["UserCode"] as string;
                     joinDate = rdr["joindate"] is DateTime jd ? jd : DateTime.UtcNow;
                     payrollEnabled = rdr["payrollenabled"] is bool pe && pe;
                 }
