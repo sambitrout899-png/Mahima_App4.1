@@ -118,6 +118,8 @@ public class AppointmentLetterService : IAppointmentLetterService
                             if (!string.IsNullOrWhiteSpace(department)) DetailRow(details, "Department", department!);
                             if (!string.IsNullOrWhiteSpace(reportingManager)) DetailRow(details, "Reporting To", reportingManager!);
                             DetailRow(details, "Date of Joining", joinDate);
+                            if (!string.IsNullOrWhiteSpace(request.AadharNumber)) DetailRow(details, "Aadhar Number", request.AadharNumber!);
+                            if (!string.IsNullOrWhiteSpace(request.Address)) DetailRow(details, "Address", request.Address!);
                             foreach (var (label, value) in compensationRows)
                                 DetailRow(details, label, value);
                         });

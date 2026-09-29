@@ -16,6 +16,10 @@ namespace Mahima.Api.v3.clean.Services
         // The user's assigned Role from the Users module (e.g. "Pastor", "Staff") -
         // used as the letter's Role/Designation line instead of free-text input.
         public string? RoleName { get; set; }
+        public string? AadharNumber { get; set; }
+
+        // Current address if set, otherwise home address - whichever the user has on file.
+        public string? Address { get; set; }
         public string? Department { get; set; }
 
         // Resolved display name (+ position, if any) of the reporting manager chosen

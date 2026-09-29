@@ -1676,9 +1676,13 @@ WHERE id = @Id AND tenant_id = @TenantId;
                 DateTime joinDate;
                 bool payrollEnabled;
                 string? roleName;
+                string? aadharNumber;
+                string? homeAddress;
+                string? currentAddress;
 
                 await using (var cmd = new NpgsqlCommand(
-                    @"SELECT u.displayname, u.""UserCode"", u.joindate, u.payrollenabled, r.name
+                    @"SELECT u.displayname, u.""UserCode"", u.joindate, u.payrollenabled, r.name,
+                             u.""AadharNumber"", u.""HomeAddress"", u.""CurrentAddress""
                       FROM public.users u
                       LEFT JOIN public.roles r ON r.id::text = u.role
                       WHERE u.id = @id AND u.tenant_id = @tenantId", conn))
@@ -1692,6 +1696,9 @@ WHERE id = @Id AND tenant_id = @TenantId;
                     joinDate = rdr["joindate"] is DateTime jd ? jd : DateTime.UtcNow;
                     payrollEnabled = rdr["payrollenabled"] is bool pe && pe;
                     roleName = rdr["name"] as string;
+                    aadharNumber = rdr["AadharNumber"] as string;
+                    homeAddress = rdr["HomeAddress"] as string;
+                    currentAddress = rdr["CurrentAddress"] as string;
                 }
 
                 if (!payrollEnabled)
@@ -1751,6 +1758,8 @@ WHERE id = @Id AND tenant_id = @TenantId;
                     UserCode = userCode,
                     JoinDate = joinDate,
                     RoleName = roleName,
+                    AadharNumber = aadharNumber,
+                    Address = !string.IsNullOrWhiteSpace(currentAddress) ? currentAddress : homeAddress,
                     Department = dto?.Department,
                     ReportingManager = reportingManagerName,
                     AppointmentDate = dto?.AppointmentDate ?? DateTime.UtcNow,
