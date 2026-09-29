@@ -1550,6 +1550,9 @@ WHERE id = @Id AND tenant_id = @TenantId;
             // "Daily", "Weekly" or "Monthly" - how the admin wants the compensation
             // section labeled on the letter. Defaults to "Monthly" if not sent.
             public string? SalaryType { get; set; }
+
+            // "en", "hi" or "pa" - defaults to "en" (no translation) if not sent.
+            public string? Language { get; set; }
         }
 
         // GET /api/users/{id}/reporting-candidates - who this user could report to, based on
@@ -1674,7 +1677,7 @@ WHERE id = @Id AND tenant_id = @TenantId;
 
                 await using var cmd = new NpgsqlCommand(
                     @"SELECT department, reporting_manager_user_id, appointment_date, additional_terms,
-                             salary_type, pdf_url, generated_at_utc
+                             salary_type, language, pdf_url, generated_at_utc
                       FROM public.appointment_letters
                       WHERE tenant_id = @tenantId AND user_id = @userId", conn);
                 cmd.Parameters.AddWithValue("tenantId", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
@@ -1691,6 +1694,7 @@ WHERE id = @Id AND tenant_id = @TenantId;
                     appointmentDate = rdr["appointment_date"] as DateTime?,
                     additionalTerms = rdr["additional_terms"] as string,
                     salaryType = rdr["salary_type"] as string,
+                    language = rdr["language"] as string,
                     hasPdf = rdr["pdf_url"] != DBNull.Value,
                     generatedAtUtc = rdr["generated_at_utc"] as DateTime?
                 });
@@ -1786,14 +1790,15 @@ WHERE id = @Id AND tenant_id = @TenantId;
                 // re-opened/edited later (see GetAppointmentLetterDetails).
                 await using (var cmd = new NpgsqlCommand(
                     @"INSERT INTO public.appointment_letters
-                        (tenant_id, user_id, department, reporting_manager_user_id, appointment_date, additional_terms, salary_type, created_at_utc, updated_at_utc)
-                      VALUES (@tenantId, @userId, @department, @reportingManagerUserId, @appointmentDate, @additionalTerms, @salaryType, now(), now())
+                        (tenant_id, user_id, department, reporting_manager_user_id, appointment_date, additional_terms, salary_type, language, created_at_utc, updated_at_utc)
+                      VALUES (@tenantId, @userId, @department, @reportingManagerUserId, @appointmentDate, @additionalTerms, @salaryType, @language, now(), now())
                       ON CONFLICT (tenant_id, user_id) DO UPDATE SET
                         department = EXCLUDED.department,
                         reporting_manager_user_id = EXCLUDED.reporting_manager_user_id,
                         appointment_date = EXCLUDED.appointment_date,
                         additional_terms = EXCLUDED.additional_terms,
                         salary_type = EXCLUDED.salary_type,
+                        language = EXCLUDED.language,
                         updated_at_utc = now()", conn))
                 {
                     cmd.Parameters.AddWithValue("tenantId", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
@@ -1803,6 +1808,7 @@ WHERE id = @Id AND tenant_id = @TenantId;
                     cmd.Parameters.AddWithValue("appointmentDate", NpgsqlTypes.NpgsqlDbType.TimestampTz, (object?)dto?.AppointmentDate ?? DBNull.Value);
                     cmd.Parameters.AddWithValue("additionalTerms", NpgsqlTypes.NpgsqlDbType.Text, (object?)dto?.AdditionalTerms ?? DBNull.Value);
                     cmd.Parameters.AddWithValue("salaryType", NpgsqlTypes.NpgsqlDbType.Text, (object?)dto?.SalaryType ?? DBNull.Value);
+                    cmd.Parameters.AddWithValue("language", NpgsqlTypes.NpgsqlDbType.Text, string.IsNullOrWhiteSpace(dto?.Language) ? "en" : dto!.Language!);
                     await cmd.ExecuteNonQueryAsync();
                 }
 
@@ -1845,6 +1851,7 @@ WHERE id = @Id AND tenant_id = @TenantId;
                     Deductions = deductions,
                     WeeklyOffDay = weeklyOffDay,
                     SalaryType = dto?.SalaryType,
+                    Language = dto?.Language,
                 });
 
                 await using (var cmd = new NpgsqlCommand(

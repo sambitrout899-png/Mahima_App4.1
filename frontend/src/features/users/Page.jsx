@@ -1112,6 +1112,7 @@ export default function UsersPageCathedralAdvanced() {
       appointmentDate: new Date().toISOString().slice(0, 10),
       additionalTerms: "",
       salaryType: "Monthly",
+      language: "en",
     });
     setModalMessage("");
     setModalSuccess(false);
@@ -1139,6 +1140,7 @@ export default function UsersPageCathedralAdvanced() {
             : new Date().toISOString().slice(0, 10),
           additionalTerms: details.additionalTerms || "",
           salaryType: details.salaryType || "Monthly",
+          language: details.language || "en",
         });
       }
     } catch (err) {
@@ -1162,6 +1164,7 @@ export default function UsersPageCathedralAdvanced() {
         AppointmentDate: letterForm.appointmentDate ? new Date(letterForm.appointmentDate).toISOString() : null,
         AdditionalTerms: letterForm.additionalTerms.trim() || null,
         SalaryType: letterForm.salaryType || null,
+        Language: letterForm.language || "en",
       };
       await api.post(`/users/${form.id}/appointment-letter`, payload);
 
@@ -2842,6 +2845,20 @@ export default function UsersPageCathedralAdvanced() {
                     <option value="Weekly">Weekly</option>
                     <option value="Monthly">Monthly</option>
                   </select>
+                </div>
+                <div className="users-field users-field-full">
+                  <label>Letter Language</label>
+                  <select
+                    value={letterForm.language}
+                    onChange={(event) => setLetterForm((prev) => ({ ...prev, language: event.target.value }))}
+                  >
+                    <option value="en">English</option>
+                    <option value="hi">Hindi</option>
+                    <option value="pa">Punjabi</option>
+                  </select>
+                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "#6b7280" }}>
+                    Labels and standard paragraphs are machine-translated; names, amounts and dates stay as entered.
+                  </p>
                 </div>
                 <div className="users-field users-field-full">
                   <label>Appointment Date</label>

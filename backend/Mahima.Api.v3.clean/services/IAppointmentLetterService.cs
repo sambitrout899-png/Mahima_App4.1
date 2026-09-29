@@ -28,6 +28,11 @@ namespace Mahima.Api.v3.clean.Services
         public DateTime AppointmentDate { get; set; }
         public string? AdditionalTerms { get; set; }
 
+        // "en", "hi" or "pa" - the fixed letter text (labels, standard paragraphs) is
+        // machine-translated into this language before rendering; names, amounts, dates
+        // and admin-entered fields like Department are left as typed.
+        public string? Language { get; set; }
+
         // Pulled from StaffPayrollSettings for this user, if any.
         public decimal? MonthlyFixedAmount { get; set; }
         public decimal? HourlyRate { get; set; }
