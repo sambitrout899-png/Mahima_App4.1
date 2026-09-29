@@ -35,14 +35,14 @@ public class AppointmentLetterService : IAppointmentLetterService
         var logoBytes = await _printTemplates.LoadLogoAsync(template);
         var brandColor = string.IsNullOrWhiteSpace(template.PrimaryColor) ? "#047857" : template.PrimaryColor;
         var orgName = string.IsNullOrWhiteSpace(template.OrganizationName) ? "Our Ministry" : template.OrganizationName;
-        var position = string.IsNullOrWhiteSpace(request.Position) ? "________________" : request.Position;
+        var roleName = string.IsNullOrWhiteSpace(request.RoleName) ? "________________" : request.RoleName;
         var department = request.Department;
         var reportingManager = request.ReportingManager;
         var appointmentDate = request.AppointmentDate.ToString("dd MMMM yyyy");
         var joinDate = request.JoinDate.ToString("dd MMMM yyyy");
         var refNumber = $"AL-{request.UserCode ?? request.UserId.ToString("N")[..8].ToUpperInvariant()}-{DateTime.UtcNow:yyyyMMdd}";
 
-        var compensationLine = BuildCompensationLine(request);
+        var compensationRows = BuildCompensationRows(request);
 
         var document = Document.Create(container =>
         {
@@ -73,6 +73,9 @@ public class AppointmentLetterService : IAppointmentLetterService
                                 .Where(v => !string.IsNullOrWhiteSpace(v)));
                             if (!string.IsNullOrWhiteSpace(contact))
                                 center.Item().AlignCenter().Text(contact).FontSize(8).FontColor("#64748B");
+                            if (!string.IsNullOrWhiteSpace(template.RegistrationNumber))
+                                center.Item().AlignCenter().Text($"Society Reg. No: {template.RegistrationNumber}")
+                                    .FontSize(8).FontColor("#64748B");
                         });
 
                         header.ConstantItem(110);
@@ -98,7 +101,7 @@ public class AppointmentLetterService : IAppointmentLetterService
                     col.Item().PaddingTop(6).Text(text =>
                     {
                         text.Span("We are pleased to confirm your appointment as ");
-                        text.Span(position).SemiBold().FontColor(brandColor);
+                        text.Span(roleName).SemiBold().FontColor(brandColor);
                         text.Span($" at {orgName}, effective from {joinDate}. Your role and the terms of your ");
                         text.Span("appointment are set out below.");
                     });
@@ -109,11 +112,12 @@ public class AppointmentLetterService : IAppointmentLetterService
                             details.Spacing(6);
                             DetailRow(details, "Employee Name", request.FullName);
                             if (!string.IsNullOrWhiteSpace(request.UserCode)) DetailRow(details, "Employee Code", request.UserCode!);
-                            DetailRow(details, "Position / Designation", position);
+                            DetailRow(details, "Role / Designation", roleName);
                             if (!string.IsNullOrWhiteSpace(department)) DetailRow(details, "Department", department!);
                             if (!string.IsNullOrWhiteSpace(reportingManager)) DetailRow(details, "Reporting To", reportingManager!);
                             DetailRow(details, "Date of Joining", joinDate);
-                            if (!string.IsNullOrWhiteSpace(compensationLine)) DetailRow(details, "Compensation", compensationLine!);
+                            foreach (var (label, value) in compensationRows)
+                                DetailRow(details, label, value);
                         });
 
                     col.Item().PaddingTop(10).Text(
@@ -160,18 +164,39 @@ public class AppointmentLetterService : IAppointmentLetterService
         return request.TenantId.ToString("N") + "/" + fileName;
     }
 
-    private static string? BuildCompensationLine(AppointmentLetterRequest request)
+    private static readonly string[] DayNames =
+        { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" };
+
+    private static List<(string Label, string Value)> BuildCompensationRows(AppointmentLetterRequest request)
     {
-        if (request.MonthlyFixedAmount is > 0)
+        var rows = new List<(string, string)>();
+        var hasMonthly = request.MonthlyFixedAmount is > 0;
+        var hasHourly = request.HourlyRate is > 0;
+
+        if (!hasMonthly && !hasHourly)
+            return rows;
+
+        rows.Add(("Salary Type", hasMonthly ? "Monthly Fixed" : "Hourly"));
+
+        if (hasMonthly)
+            rows.Add(("Monthly Fixed Amount", $"Rs. {request.MonthlyFixedAmount:N2}"));
+        if (hasHourly)
+            rows.Add(("Hourly Rate", $"Rs. {request.HourlyRate:N2} per hour"));
+        if (request.Allowances is > 0)
+            rows.Add(("Allowances", $"Rs. {request.Allowances:N2}"));
+        if (request.Deductions is > 0)
+            rows.Add(("Deductions", $"Rs. {request.Deductions:N2}"));
+
+        if (hasMonthly)
         {
-            var allowances = request.Allowances is > 0 ? $" + Rs. {request.Allowances:N2} allowances" : "";
-            return $"Rs. {request.MonthlyFixedAmount:N2}/month{allowances}";
+            var net = request.MonthlyFixedAmount!.Value + (request.Allowances ?? 0) - (request.Deductions ?? 0);
+            rows.Add(("Net Monthly Compensation", $"Rs. {net:N2}"));
         }
 
-        if (request.HourlyRate is > 0)
-            return $"Rs. {request.HourlyRate:N2} per hour";
+        if (request.WeeklyOffDay is >= 0 and <= 6)
+            rows.Add(("Weekly Off Day", DayNames[request.WeeklyOffDay.Value]));
 
-        return null;
+        return rows;
     }
 
     private static void DetailRow(ColumnDescriptor column, string label, string value)

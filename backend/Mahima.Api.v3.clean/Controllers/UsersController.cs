@@ -1542,11 +1542,90 @@ WHERE id = @Id AND tenant_id = @TenantId;
 
         public class AppointmentLetterRequestDto
         {
-            public string? Position { get; set; }
             public string? Department { get; set; }
-            public string? ReportingManager { get; set; }
+            public Guid? ReportingManagerUserId { get; set; }
             public DateTime? AppointmentDate { get; set; }
             public string? AdditionalTerms { get; set; }
+        }
+
+        // GET /api/users/{id}/reporting-candidates - who this user could report to, based on
+        // the Positions module's hierarchy: holders of the parent of the user's primary
+        // position. Returns an empty list with a "reason" when the user has no position
+        // assigned, or their position is already top-level.
+        [HttpGet("{id}/reporting-candidates")]
+        [Authorize(Roles = "admin,staff")]
+        public async Task<IActionResult> GetReportingCandidates(string id)
+        {
+            if (string.IsNullOrWhiteSpace(_connectionString))
+                return StatusCode(500, "Missing connection string.");
+            if (!Guid.TryParse(id, out var userId))
+                return BadRequest("Invalid user id.");
+
+            var tenantId = GetCurrentTenantId();
+
+            try
+            {
+                await using var conn = new NpgsqlConnection(_connectionString);
+                await conn.OpenAsync();
+                await PositionsController.EnsurePositionTablesAsync(conn);
+
+                bool hasPosition = false;
+                long? parentPositionId = null;
+
+                await using (var cmd = new NpgsqlCommand(
+                    @"SELECT p.parent_position_id
+                      FROM public.user_positions up
+                      JOIN public.positions p ON p.id = up.position_id
+                      WHERE up.user_id = @userId AND p.tenant_id = @tenantId
+                      ORDER BY up.is_primary DESC LIMIT 1", conn))
+                {
+                    cmd.Parameters.AddWithValue("userId", NpgsqlTypes.NpgsqlDbType.Uuid, userId);
+                    cmd.Parameters.AddWithValue("tenantId", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
+                    await using var rdr = await cmd.ExecuteReaderAsync();
+                    if (await rdr.ReadAsync())
+                    {
+                        hasPosition = true;
+                        parentPositionId = rdr.IsDBNull(0) ? (long?)null : rdr.GetInt64(0);
+                    }
+                }
+
+                if (!hasPosition)
+                    return Ok(new { items = Array.Empty<object>(), reason = "no_position" });
+                if (parentPositionId == null)
+                    return Ok(new { items = Array.Empty<object>(), reason = "top_level" });
+
+                var candidates = new List<object>();
+                await using (var cmd = new NpgsqlCommand(
+                    @"SELECT u.id, COALESCE(u.displayname, u.username), p.name
+                      FROM public.user_positions up
+                      JOIN public.positions p ON p.id = up.position_id
+                      JOIN public.users u ON u.id = up.user_id
+                      WHERE up.position_id = @parentPositionId AND p.tenant_id = @tenantId
+                        AND u.tenant_id = @tenantId AND u.id <> @userId
+                      ORDER BY up.is_primary DESC, COALESCE(u.displayname, u.username)", conn))
+                {
+                    cmd.Parameters.AddWithValue("parentPositionId", NpgsqlTypes.NpgsqlDbType.Bigint, parentPositionId.Value);
+                    cmd.Parameters.AddWithValue("tenantId", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
+                    cmd.Parameters.AddWithValue("userId", NpgsqlTypes.NpgsqlDbType.Uuid, userId);
+                    await using var rdr = await cmd.ExecuteReaderAsync();
+                    while (await rdr.ReadAsync())
+                    {
+                        candidates.Add(new
+                        {
+                            userId = rdr.GetGuid(0),
+                            displayName = rdr.GetString(1),
+                            positionName = rdr.GetString(2)
+                        });
+                    }
+                }
+
+                return Ok(new { items = candidates, reason = candidates.Count == 0 ? "no_holder" : null });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to load reporting candidates for user {UserId}", userId);
+                return StatusCode(500, "Could not load reporting candidates.");
+            }
         }
 
         // POST /api/users/{id}/appointment-letter - generates a fresh appointment letter PDF
@@ -1567,14 +1646,19 @@ WHERE id = @Id AND tenant_id = @TenantId;
             {
                 await using var conn = new NpgsqlConnection(_connectionString);
                 await conn.OpenAsync();
+                await PositionsController.EnsurePositionTablesAsync(conn);
 
                 string? fullName;
                 string? userCode;
                 DateTime joinDate;
                 bool payrollEnabled;
+                string? roleName;
 
                 await using (var cmd = new NpgsqlCommand(
-                    "SELECT displayname, \"UserCode\", joindate, payrollenabled FROM public.users WHERE id = @id AND tenant_id = @tenantId", conn))
+                    @"SELECT u.displayname, u.""UserCode"", u.joindate, u.payrollenabled, r.name
+                      FROM public.users u
+                      LEFT JOIN public.roles r ON r.id::text = u.role
+                      WHERE u.id = @id AND u.tenant_id = @tenantId", conn))
                 {
                     cmd.Parameters.AddWithValue("id", NpgsqlTypes.NpgsqlDbType.Uuid, userId);
                     cmd.Parameters.AddWithValue("tenantId", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
@@ -1584,6 +1668,7 @@ WHERE id = @Id AND tenant_id = @TenantId;
                     userCode = rdr["UserCode"] as string;
                     joinDate = rdr["joindate"] is DateTime jd ? jd : DateTime.UtcNow;
                     payrollEnabled = rdr["payrollenabled"] is bool pe && pe;
+                    roleName = rdr["name"] as string;
                 }
 
                 if (!payrollEnabled)
@@ -1595,9 +1680,12 @@ WHERE id = @Id AND tenant_id = @TenantId;
                 decimal? monthlyFixed = null;
                 decimal? hourlyRate = null;
                 decimal? allowances = null;
+                decimal? deductions = null;
+                int? weeklyOffDay = null;
 
                 await using (var cmd = new NpgsqlCommand(
-                    @"SELECT monthly_fixed_amount, hourly_rate, allowances FROM public.staff_payroll_settings
+                    @"SELECT monthly_fixed_amount, hourly_rate, allowances, deductions, weekly_off_day
+                      FROM public.staff_payroll_settings
                       WHERE user_id = @userId AND tenant_id = @tenantId AND is_active = true
                       ORDER BY id DESC LIMIT 1", conn))
                 {
@@ -1609,6 +1697,28 @@ WHERE id = @Id AND tenant_id = @TenantId;
                         monthlyFixed = rdr["monthly_fixed_amount"] as decimal?;
                         hourlyRate = rdr["hourly_rate"] as decimal?;
                         allowances = rdr["allowances"] as decimal?;
+                        deductions = rdr["deductions"] as decimal?;
+                        weeklyOffDay = rdr["weekly_off_day"] as int?;
+                    }
+                }
+
+                string? reportingManagerName = null;
+                if (dto?.ReportingManagerUserId is Guid managerId && managerId != Guid.Empty)
+                {
+                    await using var cmd = new NpgsqlCommand(
+                        @"SELECT COALESCE(u.displayname, u.username), p.name
+                          FROM public.users u
+                          LEFT JOIN public.user_positions up ON up.user_id = u.id AND up.is_primary = true
+                          LEFT JOIN public.positions p ON p.id = up.position_id
+                          WHERE u.id = @managerId AND u.tenant_id = @tenantId", conn);
+                    cmd.Parameters.AddWithValue("managerId", NpgsqlTypes.NpgsqlDbType.Uuid, managerId);
+                    cmd.Parameters.AddWithValue("tenantId", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
+                    await using var rdr = await cmd.ExecuteReaderAsync();
+                    if (await rdr.ReadAsync())
+                    {
+                        var managerName = rdr.GetString(0);
+                        var managerPosition = rdr.IsDBNull(1) ? null : rdr.GetString(1);
+                        reportingManagerName = managerPosition != null ? $"{managerName} ({managerPosition})" : managerName;
                     }
                 }
 
@@ -1619,14 +1729,16 @@ WHERE id = @Id AND tenant_id = @TenantId;
                     FullName = fullName!,
                     UserCode = userCode,
                     JoinDate = joinDate,
-                    Position = dto?.Position,
+                    RoleName = roleName,
                     Department = dto?.Department,
-                    ReportingManager = dto?.ReportingManager,
+                    ReportingManager = reportingManagerName,
                     AppointmentDate = dto?.AppointmentDate ?? DateTime.UtcNow,
                     AdditionalTerms = dto?.AdditionalTerms,
                     MonthlyFixedAmount = monthlyFixed,
                     HourlyRate = hourlyRate,
                     Allowances = allowances,
+                    Deductions = deductions,
+                    WeeklyOffDay = weeklyOffDay,
                 });
 
                 await using (var cmd = new NpgsqlCommand(

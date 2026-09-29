@@ -12,8 +12,14 @@ namespace Mahima.Api.v3.clean.Services
         public string FullName { get; set; } = "";
         public string? UserCode { get; set; }
         public DateTime JoinDate { get; set; }
-        public string? Position { get; set; }
+
+        // The user's assigned Role from the Users module (e.g. "Pastor", "Staff") -
+        // used as the letter's Role/Designation line instead of free-text input.
+        public string? RoleName { get; set; }
         public string? Department { get; set; }
+
+        // Resolved display name (+ position, if any) of the reporting manager chosen
+        // from the position-hierarchy dropdown - never free text.
         public string? ReportingManager { get; set; }
         public DateTime AppointmentDate { get; set; }
         public string? AdditionalTerms { get; set; }
@@ -22,6 +28,8 @@ namespace Mahima.Api.v3.clean.Services
         public decimal? MonthlyFixedAmount { get; set; }
         public decimal? HourlyRate { get; set; }
         public decimal? Allowances { get; set; }
+        public decimal? Deductions { get; set; }
+        public int? WeeklyOffDay { get; set; }
     }
 
     public interface IAppointmentLetterService

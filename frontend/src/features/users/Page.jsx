@@ -563,12 +563,14 @@ export default function UsersPageCathedralAdvanced() {
   const [resetting, setResetting] = useState(false);
   const [letterModalOpen, setLetterModalOpen] = useState(false);
   const [letterForm, setLetterForm] = useState({
-    position: "",
     department: "",
-    reportingManager: "",
+    reportingManagerUserId: "",
     appointmentDate: new Date().toISOString().slice(0, 10),
     additionalTerms: "",
   });
+  const [reportingCandidates, setReportingCandidates] = useState([]);
+  const [reportingCandidatesReason, setReportingCandidatesReason] = useState(null);
+  const [loadingCandidates, setLoadingCandidates] = useState(false);
   const [generatingLetter, setGeneratingLetter] = useState(false);
   const [downloadingLetter, setDownloadingLetter] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
@@ -1103,18 +1105,32 @@ export default function UsersPageCathedralAdvanced() {
     }
   };
 
-  const openLetterModal = () => {
-    const inferredPosition = (form.primaryPosition || "").replace(/\s*\([^)]*\)\s*$/, "").trim();
+  const openLetterModal = async () => {
     setLetterForm({
-      position: inferredPosition && inferredPosition !== "Not assigned" ? inferredPosition : "",
       department: "",
-      reportingManager: "",
+      reportingManagerUserId: "",
       appointmentDate: new Date().toISOString().slice(0, 10),
       additionalTerms: "",
     });
     setModalMessage("");
     setModalSuccess(false);
+    setReportingCandidates([]);
+    setReportingCandidatesReason(null);
     setLetterModalOpen(true);
+
+    if (!form.id) return;
+    setLoadingCandidates(true);
+    try {
+      const resp = await api.get(`/users/${form.id}/reporting-candidates`);
+      setReportingCandidates(resp?.data?.items || []);
+      setReportingCandidatesReason(resp?.data?.reason || null);
+    } catch (err) {
+      console.warn("fetchReportingCandidates error:", err);
+      setReportingCandidates([]);
+      setReportingCandidatesReason("error");
+    } finally {
+      setLoadingCandidates(false);
+    }
   };
 
   const generateAppointmentLetter = async (event) => {
@@ -1124,9 +1140,8 @@ export default function UsersPageCathedralAdvanced() {
     setGeneratingLetter(true);
     try {
       const payload = {
-        Position: letterForm.position.trim() || null,
         Department: letterForm.department.trim() || null,
-        ReportingManager: letterForm.reportingManager.trim() || null,
+        ReportingManagerUserId: letterForm.reportingManagerUserId || null,
         AppointmentDate: letterForm.appointmentDate ? new Date(letterForm.appointmentDate).toISOString() : null,
         AdditionalTerms: letterForm.additionalTerms.trim() || null,
       };
@@ -2749,13 +2764,19 @@ export default function UsersPageCathedralAdvanced() {
 
               <div className="users-modal-body">
                 <div className="users-field users-field-full">
-                  <label>Position / Designation</label>
+                  <label>Role / Designation</label>
                   <input
                     type="text"
-                    value={letterForm.position}
-                    onChange={(event) => setLetterForm((prev) => ({ ...prev, position: event.target.value }))}
-                    placeholder="e.g. Youth Pastor"
+                    value={
+                      roles.find((role) => String(role.id ?? role.Id) === String(form.role))?.name ??
+                      roles.find((role) => String(role.id ?? role.Id) === String(form.role))?.Name ??
+                      "Not set"
+                    }
+                    disabled
                   />
+                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "#6b7280" }}>
+                    Taken from this user's Role in the form above. Change the Role there if it's wrong.
+                  </p>
                 </div>
                 <div className="users-field users-field-full">
                   <label>Department</label>
@@ -2767,11 +2788,31 @@ export default function UsersPageCathedralAdvanced() {
                 </div>
                 <div className="users-field users-field-full">
                   <label>Reporting Manager</label>
-                  <input
-                    type="text"
-                    value={letterForm.reportingManager}
-                    onChange={(event) => setLetterForm((prev) => ({ ...prev, reportingManager: event.target.value }))}
-                  />
+                  <select
+                    value={letterForm.reportingManagerUserId}
+                    onChange={(event) => setLetterForm((prev) => ({ ...prev, reportingManagerUserId: event.target.value }))}
+                    disabled={loadingCandidates || reportingCandidates.length === 0}
+                  >
+                    <option value="">
+                      {loadingCandidates
+                        ? "Loading..."
+                        : reportingCandidatesReason === "top_level"
+                        ? "None (top-level position)"
+                        : reportingCandidatesReason === "no_position"
+                        ? "None (no position assigned to this user)"
+                        : reportingCandidatesReason === "no_holder"
+                        ? "None (parent position has no one assigned)"
+                        : "Select a reporting manager"}
+                    </option>
+                    {reportingCandidates.map((candidate) => (
+                      <option key={candidate.userId} value={candidate.userId}>
+                        {candidate.displayName} ({candidate.positionName})
+                      </option>
+                    ))}
+                  </select>
+                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "#6b7280" }}>
+                    Based on the Positions hierarchy: whoever holds the position above this user's.
+                  </p>
                 </div>
                 <div className="users-field users-field-full">
                   <label>Appointment Date</label>
