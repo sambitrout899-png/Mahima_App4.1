@@ -374,27 +374,35 @@ public class AppointmentLetterService : IAppointmentLetterService
         if (missing.Count == 0)
             return result;
 
-        try
+        // Asking for all ~40 phrases in one shot has been observed to make the model
+        // degenerate into repeating the wrapper key without content for some languages
+        // (seen with Punjabi) instead of returning one clean JSON object. Smaller batches
+        // are far more reliable, and a bad batch doesn't take the rest down with it.
+        const int ChunkSize = 8;
+        foreach (var chunk in missing.Chunk(ChunkSize))
         {
-            var prompt = BuildTranslationPrompt(languageName, missing);
-            var answer = await CallAiAsync(prompt);
-            var parsed = ParseTranslationMap(answer, missing);
-            if (parsed.Count == 0)
+            try
             {
-                _logger.LogWarning(
-                    "Appointment letter translation for {Language} returned no usable entries out of {Count} requested. Raw AI answer: {Answer}",
-                    languageCode, missing.Count, answer ?? "(null)");
+                var prompt = BuildTranslationPrompt(languageName, chunk);
+                var answer = await CallAiAsync(prompt);
+                var parsed = ParseTranslationMap(answer, chunk);
+                if (parsed.Count == 0)
+                {
+                    _logger.LogWarning(
+                        "Appointment letter translation for {Language} returned no usable entries out of {Count} requested. Raw AI answer: {Answer}",
+                        languageCode, chunk.Length, answer ?? "(null)");
+                }
+                foreach (var pair in parsed)
+                {
+                    result[pair.Key] = pair.Value;
+                    if (pair.Key != additionalTerms)
+                        _cache.Set(CacheKey(languageCode, pair.Key), pair.Value, TimeSpan.FromDays(30));
+                }
             }
-            foreach (var pair in parsed)
+            catch (Exception ex)
             {
-                result[pair.Key] = pair.Value;
-                if (pair.Key != additionalTerms)
-                    _cache.Set(CacheKey(languageCode, pair.Key), pair.Value, TimeSpan.FromDays(30));
+                _logger.LogWarning(ex, "Appointment letter translation failed for language {Language}", languageCode);
             }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Appointment letter translation failed for language {Language}", languageCode);
         }
 
         return result;
@@ -448,7 +456,9 @@ public class AppointmentLetterService : IAppointmentLetterService
             "Some phrases contain placeholders like {0}, {1} or {2} - copy those placeholders through EXACTLY as-is, unchanged, " +
             "in the same relative position, and translate only the surrounding words. " +
             "Do not translate proper nouns, amounts, or anything that is not plain English prose. " +
-            "Return ONLY valid JSON in this exact shape: {\"translations\":{\"original\":\"translated\"}}. " +
+            "Return ONLY ONE valid JSON object containing ALL of the given phrases as keys, in this exact shape: " +
+            "{\"translations\":{\"original1\":\"translated1\",\"original2\":\"translated2\"}}. " +
+            "Do not repeat the \"translations\" key and do not output more than one JSON object. " +
             "Do not add markdown or explanation. Input texts JSON array: " + json;
     }
 
