@@ -67,6 +67,8 @@ public class AppointmentLetterService : IAppointmentLetterService
                         {
                             center.Item().AlignCenter().Text(orgName.ToUpperInvariant())
                                 .FontSize(16).Bold().FontColor(brandColor).LetterSpacing(0.06f);
+                            if (!string.IsNullOrWhiteSpace(template.HeaderText))
+                                center.Item().AlignCenter().Text(template.HeaderText).FontSize(8).FontColor("#64748B");
                             if (template.ShowAddress && !string.IsNullOrWhiteSpace(template.Address))
                                 center.Item().AlignCenter().Text(template.Address).FontSize(8).FontColor("#64748B");
                             var contact = string.Join("  |  ", new[] { template.Phone, template.Email }
@@ -156,6 +158,16 @@ public class AppointmentLetterService : IAppointmentLetterService
                             .FontSize(7).FontColor("#94A3B8");
                         footer.ConstantItem(160).AlignRight().Text(refNumber).FontSize(7).FontColor("#94A3B8");
                     });
+                    if (template.ShowPageNumbers)
+                    {
+                        col.Item().PaddingTop(2).AlignRight().Text(t =>
+                        {
+                            t.DefaultTextStyle(s => s.FontSize(7).FontColor("#94A3B8"));
+                            t.CurrentPageNumber();
+                            t.Span(" / ");
+                            t.TotalPages();
+                        });
+                    }
                 });
             });
         });
