@@ -510,48 +510,87 @@ public class AppointmentLetterService : IAppointmentLetterService
         return null;
     }
 
+    // The AI is asked for one combined {"translations": {...}} object, and usually returns
+    // exactly that - but for some languages (observed with Punjabi) it instead answers with
+    // several separate {"translations": {...}} objects back-to-back, one per phrase. Rather
+    // than assume either shape, scan for every balanced top-level {...} span and merge
+    // whatever each one contains.
     private static Dictionary<string, string> ParseTranslationMap(string? answer, IReadOnlyList<string> originals)
     {
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         if (string.IsNullOrWhiteSpace(answer)) return result;
 
-        var json = ExtractJsonObject(answer);
-        if (string.IsNullOrWhiteSpace(json)) return result;
+        var allowed = originals.ToHashSet(StringComparer.Ordinal);
 
-        try
+        foreach (var jsonChunk in ExtractJsonObjects(answer))
         {
-            using var document = JsonDocument.Parse(json);
-            var root = document.RootElement;
-            if (root.ValueKind == JsonValueKind.Object &&
-                root.TryGetProperty("translations", out var translations) &&
-                translations.ValueKind == JsonValueKind.Object)
+            try
             {
-                root = translations;
+                using var document = JsonDocument.Parse(jsonChunk);
+                var root = document.RootElement;
+                if (root.ValueKind == JsonValueKind.Object &&
+                    root.TryGetProperty("translations", out var translations) &&
+                    translations.ValueKind == JsonValueKind.Object)
+                {
+                    root = translations;
+                }
+
+                if (root.ValueKind != JsonValueKind.Object) continue;
+
+                foreach (var property in root.EnumerateObject())
+                {
+                    if (!allowed.Contains(property.Name)) continue;
+                    var value = property.Value.ValueKind == JsonValueKind.String ? property.Value.GetString() : null;
+                    if (!string.IsNullOrWhiteSpace(value))
+                        result[property.Name] = value.Trim();
+                }
             }
-
-            if (root.ValueKind != JsonValueKind.Object) return result;
-
-            var allowed = originals.ToHashSet(StringComparer.Ordinal);
-            foreach (var property in root.EnumerateObject())
+            catch (JsonException)
             {
-                if (!allowed.Contains(property.Name)) continue;
-                var value = property.Value.ValueKind == JsonValueKind.String ? property.Value.GetString() : null;
-                if (!string.IsNullOrWhiteSpace(value))
-                    result[property.Name] = value.Trim();
+                // Skip this chunk - a malformed object shouldn't stop the rest from parsing.
             }
-        }
-        catch (JsonException)
-        {
-            // Leave result empty - callers fall back to the original English text.
         }
 
         return result;
     }
 
-    private static string? ExtractJsonObject(string text)
+    // Finds every balanced top-level {...} substring in the text (brace-depth counting,
+    // aware of quoted strings so braces inside translated text don't throw off the count).
+    private static IEnumerable<string> ExtractJsonObjects(string text)
     {
-        var start = text.IndexOf('{');
-        var end = text.LastIndexOf('}');
-        return start >= 0 && end > start ? text[start..(end + 1)] : null;
+        var depth = 0;
+        var start = -1;
+        var inString = false;
+        var escapeNext = false;
+
+        for (var i = 0; i < text.Length; i++)
+        {
+            var c = text[i];
+
+            if (inString)
+            {
+                if (escapeNext) escapeNext = false;
+                else if (c == '\\') escapeNext = true;
+                else if (c == '"') inString = false;
+                continue;
+            }
+
+            if (c == '"') { inString = true; continue; }
+
+            if (c == '{')
+            {
+                if (depth == 0) start = i;
+                depth++;
+            }
+            else if (c == '}' && depth > 0)
+            {
+                depth--;
+                if (depth == 0 && start >= 0)
+                {
+                    yield return text[start..(i + 1)];
+                    start = -1;
+                }
+            }
+        }
     }
 }
