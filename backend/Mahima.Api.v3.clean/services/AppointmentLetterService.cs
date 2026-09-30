@@ -89,6 +89,101 @@ public class AppointmentLetterService : IAppointmentLetterService
     private static readonly string[] DayNames =
         { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" };
 
+    // Hand-verified translations for the letter's fixed labels/paragraphs - NOT machine
+    // translated. AI translation of this small, unchanging set was unreliable (degenerate
+    // repeated JSON for Punjabi, and stray codepoints outside the Devanagari/Gurmukhi block
+    // for Hindi that rendered as tofu boxes). Only the admin's own free-form "Additional
+    // Terms" text still goes through AI translation, since that's genuinely dynamic.
+    private static readonly Dictionary<string, string> HindiTranslations = new(StringComparer.Ordinal)
+    {
+        [TitleText] = "नियुक्ति पत्र",
+        [RefLabel] = "संदर्भ:",
+        [DateLabel] = "दिनांक:",
+        [SalutationTemplate] = "प्रिय {0},",
+        [IntroTemplate] = "हमें यह बताते हुए हर्ष हो रहा है कि आपकी नियुक्ति {1} में {0} के पद पर, {2} से प्रभावी, की जाती है। आपकी भूमिका और नियुक्ति की शर्तें नीचे दी गई हैं।",
+        [TermsTemplate] = "यह नियुक्ति {0} की नीतियों, आचार संहिता और दिशा-निर्देशों के अधीन है, जिन्हें समय-समय पर संशोधित किया जा सकता है। आपसे अपेक्षा की जाती है कि आप अपने कर्तव्यों का पालन परिश्रम, ईमानदारी और इस मिनिस्ट्री के मूल्यों के अनुरूप तरीके से करें।",
+        [AdditionalTermsHeading] = "अतिरिक्त शर्तें:",
+        [SignRequestText] = "कृपया इस नियुक्ति और इसकी शर्तों की स्वीकृति के रूप में इस पत्र की एक प्रति पर हस्ताक्षर करके वापस करें।",
+        [ClosingLineText] = "हमें आपके मूल्यवान योगदान की प्रतीक्षा रहेगी।",
+        [SincerelyText] = "भवदीय,",
+        [ForOrgTemplate] = "{0} की ओर से",
+        [SigAuthorizedText] = "अधिकृत हस्ताक्षरकर्ता",
+        [SigEmployeeText] = "कर्मचारी स्वीकृति",
+        [RegNoTemplate] = "सोसायटी पंजीकरण संख्या: {0}",
+        [DefaultFooterText] = "यह एक सिस्टम-जनित नियुक्ति पत्र है।",
+        [PerDayText] = "प्रति दिन",
+        [LabelEmployeeName] = "कर्मचारी का नाम",
+        [LabelEmployeeCode] = "कर्मचारी कोड",
+        [LabelRole] = "पद / भूमिका",
+        [LabelDepartment] = "विभाग",
+        [LabelReportingTo] = "रिपोर्टिंग अधिकारी",
+        [LabelJoinDate] = "ज्वाइनिंग की तिथि",
+        [LabelAadhar] = "आधार नंबर",
+        [LabelAddress] = "पता",
+        [LabelSalaryType] = "वेतन प्रकार",
+        [LabelGrossMonthly] = "सकल मासिक वेतन",
+        [LabelDailyRate] = "दैनिक दर",
+        [LabelDeductions] = "कटौती",
+        [LabelNetMonthly] = "शुद्ध मासिक वेतन",
+        [LabelAnnualCtc] = "वार्षिक सीटीसी (लगभग)",
+        [LabelWeeklyOff] = "साप्ताहिक अवकाश दिवस",
+        [ValueDaily] = "दैनिक",
+        [ValueWeekly] = "साप्ताहिक",
+        [ValueMonthly] = "मासिक",
+        ["Sunday"] = "रविवार",
+        ["Monday"] = "सोमवार",
+        ["Tuesday"] = "मंगलवार",
+        ["Wednesday"] = "बुधवार",
+        ["Thursday"] = "गुरुवार",
+        ["Friday"] = "शुक्रवार",
+        ["Saturday"] = "शनिवार",
+    };
+
+    private static readonly Dictionary<string, string> PunjabiTranslations = new(StringComparer.Ordinal)
+    {
+        [TitleText] = "ਨਿਯੁਕਤੀ ਪੱਤਰ",
+        [RefLabel] = "ਹਵਾਲਾ:",
+        [DateLabel] = "ਮਿਤੀ:",
+        [SalutationTemplate] = "ਪਿਆਰੇ {0},",
+        [IntroTemplate] = "ਸਾਨੂੰ ਇਹ ਦੱਸਦੇ ਹੋਏ ਖੁਸ਼ੀ ਹੋ ਰਹੀ ਹੈ ਕਿ ਤੁਹਾਡੀ ਨਿਯੁਕਤੀ {1} ਵਿੱਚ {0} ਦੇ ਅਹੁਦੇ 'ਤੇ, {2} ਤੋਂ ਪ੍ਰਭਾਵੀ, ਕੀਤੀ ਜਾਂਦੀ ਹੈ। ਤੁਹਾਡੀ ਭੂਮਿਕਾ ਅਤੇ ਨਿਯੁਕਤੀ ਦੀਆਂ ਸ਼ਰਤਾਂ ਹੇਠਾਂ ਦਿੱਤੀਆਂ ਗਈਆਂ ਹਨ।",
+        [TermsTemplate] = "ਇਹ ਨਿਯੁਕਤੀ {0} ਦੀਆਂ ਨੀਤੀਆਂ, ਆਚਾਰ ਸੰਹਿਤਾ ਅਤੇ ਦਿਸ਼ਾ-ਨਿਰਦੇਸ਼ਾਂ ਦੇ ਅਧੀਨ ਹੈ, ਜਿਨ੍ਹਾਂ ਨੂੰ ਸਮੇਂ-ਸਮੇਂ 'ਤੇ ਸੋਧਿਆ ਜਾ ਸਕਦਾ ਹੈ। ਤੁਹਾਡੇ ਤੋਂ ਉਮੀਦ ਕੀਤੀ ਜਾਂਦੀ ਹੈ ਕਿ ਤੁਸੀਂ ਆਪਣੇ ਫਰਜ਼ ਮਿਹਨਤ, ਇਮਾਨਦਾਰੀ ਅਤੇ ਇਸ ਮਿਨਿਸਟਰੀ ਦੀਆਂ ਕਦਰਾਂ-ਕੀਮਤਾਂ ਅਨੁਸਾਰ ਨਿਭਾਓ।",
+        [AdditionalTermsHeading] = "ਵਾਧੂ ਸ਼ਰਤਾਂ:",
+        [SignRequestText] = "ਕਿਰਪਾ ਕਰਕੇ ਇਸ ਨਿਯੁਕਤੀ ਅਤੇ ਇਸ ਦੀਆਂ ਸ਼ਰਤਾਂ ਦੀ ਸਵੀਕ੍ਰਿਤੀ ਵਜੋਂ ਇਸ ਪੱਤਰ ਦੀ ਇੱਕ ਕਾਪੀ 'ਤੇ ਦਸਤਖਤ ਕਰਕੇ ਵਾਪਸ ਕਰੋ।",
+        [ClosingLineText] = "ਸਾਨੂੰ ਤੁਹਾਡੇ ਕੀਮਤੀ ਯੋਗਦਾਨ ਦੀ ਉਡੀਕ ਰਹੇਗੀ।",
+        [SincerelyText] = "ਤੁਹਾਡਾ ਵਿਸ਼ਵਾਸਪਾਤਰ,",
+        [ForOrgTemplate] = "{0} ਵੱਲੋਂ",
+        [SigAuthorizedText] = "ਅਧਿਕਾਰਤ ਦਸਤਖਤੀ",
+        [SigEmployeeText] = "ਕਰਮਚਾਰੀ ਪ੍ਰਵਾਨਗੀ",
+        [RegNoTemplate] = "ਸੋਸਾਇਟੀ ਰਜਿ. ਨੰ: {0}",
+        [DefaultFooterText] = "ਇਹ ਇੱਕ ਸਿਸਟਮ ਦੁਆਰਾ ਤਿਆਰ ਕੀਤਾ ਨਿਯੁਕਤੀ ਪੱਤਰ ਹੈ।",
+        [PerDayText] = "ਪ੍ਰਤੀ ਦਿਨ",
+        [LabelEmployeeName] = "ਕਰਮਚਾਰੀ ਦਾ ਨਾਮ",
+        [LabelEmployeeCode] = "ਕਰਮਚਾਰੀ ਕੋਡ",
+        [LabelRole] = "ਅਹੁਦਾ / ਭੂਮਿਕਾ",
+        [LabelDepartment] = "ਵਿਭਾਗ",
+        [LabelReportingTo] = "ਰਿਪੋਰਟਿੰਗ ਅਧਿਕਾਰੀ",
+        [LabelJoinDate] = "ਜੁਆਇਨਿੰਗ ਦੀ ਮਿਤੀ",
+        [LabelAadhar] = "ਆਧਾਰ ਨੰਬਰ",
+        [LabelAddress] = "ਪਤਾ",
+        [LabelSalaryType] = "ਤਨਖਾਹ ਦੀ ਕਿਸਮ",
+        [LabelGrossMonthly] = "ਕੁੱਲ ਮਾਸਿਕ ਤਨਖਾਹ",
+        [LabelDailyRate] = "ਰੋਜ਼ਾਨਾ ਦਰ",
+        [LabelDeductions] = "ਕਟੌਤੀਆਂ",
+        [LabelNetMonthly] = "ਸ਼ੁੱਧ ਮਾਸਿਕ ਤਨਖਾਹ",
+        [LabelAnnualCtc] = "ਸਲਾਨਾ ਸੀਟੀਸੀ (ਲਗਭਗ)",
+        [LabelWeeklyOff] = "ਹਫ਼ਤਾਵਾਰੀ ਛੁੱਟੀ ਦਾ ਦਿਨ",
+        [ValueDaily] = "ਰੋਜ਼ਾਨਾ",
+        [ValueWeekly] = "ਹਫ਼ਤਾਵਾਰੀ",
+        [ValueMonthly] = "ਮਾਸਿਕ",
+        ["Sunday"] = "ਐਤਵਾਰ",
+        ["Monday"] = "ਸੋਮਵਾਰ",
+        ["Tuesday"] = "ਮੰਗਲਵਾਰ",
+        ["Wednesday"] = "ਬੁੱਧਵਾਰ",
+        ["Thursday"] = "ਵੀਰਵਾਰ",
+        ["Friday"] = "ਸ਼ੁੱਕਰਵਾਰ",
+        ["Saturday"] = "ਸ਼ਨੀਵਾਰ",
+    };
+
     public async Task<string> GenerateAsync(AppointmentLetterRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -101,6 +196,7 @@ public class AppointmentLetterService : IAppointmentLetterService
 
         var template = await _printTemplates.GetAsync(request.TenantId);
         var logoBytes = await _printTemplates.LoadLogoAsync(template);
+        var signatureBytes = await _printTemplates.LoadSignatureAsync(template);
         var brandColor = string.IsNullOrWhiteSpace(template.PrimaryColor) ? "#047857" : template.PrimaryColor;
         var orgName = string.IsNullOrWhiteSpace(template.OrganizationName) ? "Our Ministry" : template.OrganizationName;
         var roleName = string.IsNullOrWhiteSpace(request.RoleName) ? "________________" : request.RoleName;
@@ -111,10 +207,13 @@ public class AppointmentLetterService : IAppointmentLetterService
         var refNumber = $"AL-{request.UserCode ?? request.UserId.ToString("N")[..8].ToUpperInvariant()}-{DateTime.UtcNow:yyyyMMdd}";
 
         var languageCode = (request.Language ?? "en").Trim().ToLowerInvariant();
-        var translations = languageCode != "en" && LanguageNames.TryGetValue(languageCode, out var languageName)
-            ? await TranslateLetterStringsAsync(languageCode, languageName, request.AdditionalTerms)
-            : new Dictionary<string, string>(StringComparer.Ordinal);
-        string T(string text) => translations.TryGetValue(text, out var translated) && !string.IsNullOrWhiteSpace(translated) ? translated : text;
+        var staticTranslations = languageCode switch
+        {
+            "hi" => HindiTranslations,
+            "pa" => PunjabiTranslations,
+            _ => null,
+        };
+        string T(string text) => staticTranslations != null && staticTranslations.TryGetValue(text, out var translated) ? translated : text;
 
         // QuestPDF bundles its own private Skia build - it does NOT fall back to whatever
         // fonts happen to be installed on the OS. Devanagari/Gurmukhi glyphs render as
@@ -129,7 +228,15 @@ public class AppointmentLetterService : IAppointmentLetterService
         if (scriptFontFamily != null) EnsureScriptFontsRegistered();
 
         var (introBeforeRole, introAfterRole) = SplitOnFirstPlaceholder(T(IntroTemplate), orgName, joinDate);
-        var translatedAdditionalTerms = !string.IsNullOrWhiteSpace(request.AdditionalTerms) ? T(request.AdditionalTerms!) : null;
+
+        // Only the admin's own free-form text is still machine-translated - it's genuinely
+        // dynamic, unlike the fixed labels/paragraphs above.
+        var translatedAdditionalTerms = request.AdditionalTerms;
+        if (staticTranslations != null && !string.IsNullOrWhiteSpace(request.AdditionalTerms) && LanguageNames.TryGetValue(languageCode, out var languageName))
+        {
+            translatedAdditionalTerms = await TranslateFreeTextAsync(languageCode, languageName, request.AdditionalTerms!)
+                ?? request.AdditionalTerms;
+        }
 
         var compensationRows = BuildCompensationRows(request, T);
 
@@ -232,9 +339,10 @@ public class AppointmentLetterService : IAppointmentLetterService
 
                     col.Item().PaddingTop(30).Row(signatures =>
                     {
-                        Signature(signatures.RelativeItem(), T(SigAuthorizedText));
+                        var signatoryName = !string.IsNullOrWhiteSpace(template.SignatoryName) ? template.SignatoryName! : T(SigAuthorizedText);
+                        AuthorizedSignature(signatures.RelativeItem(), signatureBytes, signatoryName, template.SignatoryTitle);
                         signatures.ConstantItem(45);
-                        Signature(signatures.RelativeItem(), T(SigEmployeeText));
+                        BlankSignature(signatures.RelativeItem(), T(SigEmployeeText));
                     });
                 });
 
@@ -327,88 +435,71 @@ public class AppointmentLetterService : IAppointmentLetterService
         });
     }
 
-    private static void Signature(IContainer container, string label)
+    // The org's authorized signatory: a persistently-configured signature image (Tenant
+    // Print Templates settings) plus their name/title, so nobody has to re-upload or
+    // re-type this for every single letter. Falls back to a blank line + generic label
+    // when no signatory has been configured yet.
+    private static void AuthorizedSignature(IContainer container, byte[]? signatureImage, string name, string? title)
     {
         container.Column(column =>
         {
-            column.Item().Height(20);
+            column.Item().Height(34).AlignBottom().Element(sig =>
+            {
+                if (signatureImage is { Length: > 0 })
+                    sig.AlignCenter().MaxHeight(32).MaxWidth(130).Image(signatureImage).FitArea();
+            });
+            column.Item().LineHorizontal(0.8f).LineColor("#64748B");
+            column.Item().PaddingTop(4).AlignCenter().Text(name)
+                .FontSize(8).Bold().FontColor("#334155");
+            if (!string.IsNullOrWhiteSpace(title))
+                column.Item().AlignCenter().Text(title!)
+                    .FontSize(7).FontColor("#64748B");
+        });
+    }
+
+    private static void BlankSignature(IContainer container, string label)
+    {
+        container.Column(column =>
+        {
+            column.Item().Height(34);
             column.Item().LineHorizontal(0.8f).LineColor("#64748B");
             column.Item().PaddingTop(4).AlignCenter().Text(label)
                 .FontSize(7).Bold().FontColor("#475569").LetterSpacing(0.06f);
         });
     }
 
-    // Translates the letter's fixed labels/paragraphs (plus the admin's free-form
-    // Additional Terms, if any) into the requested language via the same AI provider
-    // UiTranslationController uses for the app's UI, with a long-lived cache per
-    // language+text so the same labels aren't re-translated on every letter.
-    private async Task<Dictionary<string, string>> TranslateLetterStringsAsync(string languageCode, string languageName, string? additionalTerms)
+    // Translates a single piece of admin-entered free text (the "Additional Terms" field)
+    // via the same AI provider UiTranslationController uses for the app's UI. The fixed
+    // labels/paragraphs elsewhere in the letter are hand-translated, not AI-translated -
+    // see HindiTranslations/PunjabiTranslations above.
+    private async Task<string?> TranslateFreeTextAsync(string languageCode, string languageName, string text)
     {
-        var fixedStrings = new List<string>
-        {
-            TitleText, RefLabel, DateLabel, SalutationTemplate, IntroTemplate, TermsTemplate,
-            AdditionalTermsHeading, SignRequestText, ClosingLineText, SincerelyText, ForOrgTemplate,
-            SigAuthorizedText, SigEmployeeText, RegNoTemplate, DefaultFooterText, PerDayText,
-            LabelEmployeeName, LabelEmployeeCode, LabelRole, LabelDepartment, LabelReportingTo,
-            LabelJoinDate, LabelAadhar, LabelAddress, LabelSalaryType, LabelGrossMonthly, LabelDailyRate,
-            LabelDeductions, LabelNetMonthly, LabelAnnualCtc, LabelWeeklyOff,
-            ValueDaily, ValueWeekly, ValueMonthly,
-        };
-        fixedStrings.AddRange(DayNames);
+        var cacheKey = $"appointment-letter-freetext:{languageCode}:{text}";
+        if (_cache.TryGetValue<string>(cacheKey, out var cached) && !string.IsNullOrWhiteSpace(cached))
+            return cached;
 
-        var result = new Dictionary<string, string>(StringComparer.Ordinal);
-        var missing = new List<string>();
-        foreach (var text in fixedStrings.Distinct(StringComparer.Ordinal))
+        try
         {
-            if (_cache.TryGetValue<string>(CacheKey(languageCode, text), out var cached) && !string.IsNullOrWhiteSpace(cached))
-                result[text] = cached;
-            else
-                missing.Add(text);
+            var prompt = BuildTranslationPrompt(languageName, new[] { text });
+            var answer = await CallAiAsync(prompt);
+            var parsed = ParseTranslationMap(answer, new[] { text });
+            if (parsed.TryGetValue(text, out var translated) && !string.IsNullOrWhiteSpace(translated))
+            {
+                _cache.Set(cacheKey, translated, TimeSpan.FromDays(7));
+                return translated;
+            }
+
+            _logger.LogWarning(
+                "Appointment letter Additional Terms translation for {Language} returned nothing usable. Raw AI answer: {Answer}",
+                languageCode, answer ?? "(null)");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Appointment letter Additional Terms translation failed for language {Language}", languageCode);
         }
 
-        // The admin's own free text - not cached long-term the same way (harmless if it is;
-        // just also translated in the same batch call to save a round trip).
-        if (!string.IsNullOrWhiteSpace(additionalTerms) && !result.ContainsKey(additionalTerms))
-            missing.Add(additionalTerms);
-
-        if (missing.Count == 0)
-            return result;
-
-        // Asking for all ~40 phrases in one shot has been observed to make the model
-        // degenerate into repeating the wrapper key without content for some languages
-        // (seen with Punjabi) instead of returning one clean JSON object. Smaller batches
-        // are far more reliable, and a bad batch doesn't take the rest down with it.
-        const int ChunkSize = 8;
-        foreach (var chunk in missing.Chunk(ChunkSize))
-        {
-            try
-            {
-                var prompt = BuildTranslationPrompt(languageName, chunk);
-                var answer = await CallAiAsync(prompt);
-                var parsed = ParseTranslationMap(answer, chunk);
-                if (parsed.Count == 0)
-                {
-                    _logger.LogWarning(
-                        "Appointment letter translation for {Language} returned no usable entries out of {Count} requested. Raw AI answer: {Answer}",
-                        languageCode, chunk.Length, answer ?? "(null)");
-                }
-                foreach (var pair in parsed)
-                {
-                    result[pair.Key] = pair.Value;
-                    if (pair.Key != additionalTerms)
-                        _cache.Set(CacheKey(languageCode, pair.Key), pair.Value, TimeSpan.FromDays(30));
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Appointment letter translation failed for language {Language}", languageCode);
-            }
-        }
-
-        return result;
+        return null;
     }
-
-    private static string CacheKey(string languageCode, string text) => $"appointment-letter-translation:{languageCode}:{text}";
 
     private static readonly object ScriptFontLock = new();
     private static bool _scriptFontsRegistered;
@@ -521,10 +612,9 @@ public class AppointmentLetterService : IAppointmentLetterService
     }
 
     // The AI is asked for one combined {"translations": {...}} object, and usually returns
-    // exactly that - but for some languages (observed with Punjabi) it instead answers with
-    // several separate {"translations": {...}} objects back-to-back, one per phrase. Rather
-    // than assume either shape, scan for every balanced top-level {...} span and merge
-    // whatever each one contains.
+    // exactly that - but has been observed to answer with several separate {"translations":
+    // {...}} objects back-to-back instead. Rather than assume either shape, scan for every
+    // balanced top-level {...} span and merge whatever each one contains.
     private static Dictionary<string, string> ParseTranslationMap(string? answer, IReadOnlyList<string> originals)
     {
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
