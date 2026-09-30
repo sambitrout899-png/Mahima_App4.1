@@ -20,6 +20,10 @@ namespace Mahima.Api.v3.clean.Controllers
     [Route("api/projectmanagement")]
     public class ProjectManagementController : ControllerBase
     {
+        // Keep the compatibility version for existing clients. The current UI also
+        // checks the build and script capability before starting a render.
+        private const string DemoRendererVersion = "2026.08.10-short-video-v3";
+        private const string DemoRendererBuild = "2026.09.18-cinematic-story-v7";
         private readonly string _connStr;
         private readonly ILogger<ProjectManagementController> _logger;
         private readonly IConfiguration _config;
@@ -32,6 +36,29 @@ namespace Mahima.Api.v3.clean.Controllers
             _logger = logger;
             _config = config;
             _env = env;
+        }
+
+        [HttpPost("demo-voice-preview")]
+        public async Task<IActionResult> PreviewDemoVoice([FromBody] DemoRenderJobDto dto)
+        {
+            var allowedVoices = new[] { "onyx", "ash", "echo", "nova", "shimmer" };
+            if (!allowedVoices.Contains(dto.TtsVoice) || string.IsNullOrWhiteSpace(dto.VoiceOver) || dto.VoiceOver.Length > 1000)
+                return BadRequest(new { message = "Select a supported voice and a short preview script." });
+            var apiKey = OpenAiApiKey();
+            if (string.IsNullOrWhiteSpace(apiKey))
+                return BadRequest(new { message = "Demo speech is not configured." });
+            var baseUrl = (_config["ProjectDemo:OpenAiBaseUrl"] ?? _config["PastorBot:BaseUrl"] ?? "https://api.openai.com/v1").TrimEnd('/');
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            using var content = new StringContent(JsonSerializer.Serialize(new {
+                model = _config["ProjectDemo:TtsModel"] ?? "gpt-4o-mini-tts",
+                voice = dto.TtsVoice, input = dto.VoiceOver,
+                instructions = dto.TtsInstructions, response_format = "mp3"
+            }), Encoding.UTF8, "application/json");
+            using var response = await client.PostAsync($"{baseUrl}/audio/speech", content, HttpContext.RequestAborted);
+            if (!response.IsSuccessStatusCode)
+                return StatusCode(502, new { message = "The speech provider could not generate the selected voice preview." });
+            return File(await response.Content.ReadAsByteArrayAsync(HttpContext.RequestAborted), "audio/mpeg");
         }
 
         private async Task EnsureSchemaAsync(NpgsqlConnection conn)
@@ -81,6 +108,9 @@ CREATE TABLE IF NOT EXISTS public.""ProjectDemoRenderJobs"" (
     ""VoiceLabel"" text NULL,
     ""TtsVoice"" text NULL,
     ""TtsInstructions"" text NULL,
+    ""DurationSeconds"" integer NOT NULL DEFAULT 90,
+    ""MusicStyle"" text NOT NULL DEFAULT 'uplifting',
+    ""MusicVolume"" double precision NOT NULL DEFAULT 0.12,
     ""CaptureRoutes"" jsonb NOT NULL DEFAULT '[]'::jsonb,
     ""RendererRequirements"" jsonb NOT NULL DEFAULT '[]'::jsonb,
     ""RequestedById"" uuid NULL,
@@ -96,7 +126,10 @@ ALTER TABLE public.""ProjectDemoRenderJobs"" ADD COLUMN IF NOT EXISTS ""AppBaseU
 ALTER TABLE public.""ProjectDemoRenderJobs"" ADD COLUMN IF NOT EXISTS ""VoiceKey"" text NULL;
 ALTER TABLE public.""ProjectDemoRenderJobs"" ADD COLUMN IF NOT EXISTS ""VoiceLabel"" text NULL;
 ALTER TABLE public.""ProjectDemoRenderJobs"" ADD COLUMN IF NOT EXISTS ""TtsVoice"" text NULL;
-ALTER TABLE public.""ProjectDemoRenderJobs"" ADD COLUMN IF NOT EXISTS ""TtsInstructions"" text NULL;";
+ALTER TABLE public.""ProjectDemoRenderJobs"" ADD COLUMN IF NOT EXISTS ""TtsInstructions"" text NULL;
+ALTER TABLE public.""ProjectDemoRenderJobs"" ADD COLUMN IF NOT EXISTS ""DurationSeconds"" integer NOT NULL DEFAULT 90;
+ALTER TABLE public.""ProjectDemoRenderJobs"" ADD COLUMN IF NOT EXISTS ""MusicStyle"" text NOT NULL DEFAULT 'uplifting';
+ALTER TABLE public.""ProjectDemoRenderJobs"" ADD COLUMN IF NOT EXISTS ""MusicVolume"" double precision NOT NULL DEFAULT 0.12;";
 
             await using var cmd = new NpgsqlCommand(sql, conn);
             await cmd.ExecuteNonQueryAsync();
@@ -211,7 +244,7 @@ RETURNING ""Id"";", conn);
             await EnsureSchemaAsync(conn);
 
             var sql = @"
-SELECT ""Id"", ""ProjectId"", ""Name"", ""Language"", ""Status"", ""OutputFileName"", ""FrameRate"", ""Resolution"", ""VoiceOver"", ""AppBaseUrl"", ""VoiceKey"", ""VoiceLabel"", ""TtsVoice"", ""TtsInstructions"", ""CaptureRoutes""::text, ""RendererRequirements""::text, ""RequestedAtUtc"", ""CompletedAtUtc"", ""DownloadUrl"", ""LastError""
+SELECT ""Id"", ""ProjectId"", ""Name"", ""Language"", ""Status"", ""OutputFileName"", ""FrameRate"", ""Resolution"", ""VoiceOver"", ""AppBaseUrl"", ""VoiceKey"", ""VoiceLabel"", ""TtsVoice"", ""TtsInstructions"", ""CaptureRoutes""::text, ""RendererRequirements""::text, ""DurationSeconds"", ""MusicStyle"", ""MusicVolume"", ""RequestedAtUtc"", ""CompletedAtUtc"", ""DownloadUrl"", ""LastError""
 FROM public.""ProjectDemoRenderJobs""" + (string.IsNullOrWhiteSpace(language) ? "" : " WHERE \"Language\" = @language") + @"
 ORDER BY ""RequestedAtUtc"" DESC
 LIMIT 50;";
@@ -239,15 +272,29 @@ LIMIT 50;";
                     ttsInstructions = rdr.IsDBNull(13) ? null : rdr.GetString(13),
                     captureRoutes = JsonElementFrom(rdr.GetString(14)),
                     rendererRequirements = JsonElementFrom(rdr.GetString(15)),
-                    requestedAt = rdr.GetDateTime(16),
-                    completedAt = rdr.IsDBNull(17) ? (DateTime?)null : rdr.GetDateTime(17),
-                    downloadUrl = rdr.IsDBNull(18) ? null : rdr.GetString(18),
-                    lastError = rdr.IsDBNull(19) ? null : rdr.GetString(19)
+                    durationSeconds = rdr.GetInt32(16),
+                    musicStyle = rdr.GetString(17),
+                    musicVolume = rdr.GetDouble(18),
+                    requestedAt = rdr.GetDateTime(19),
+                    completedAt = rdr.IsDBNull(20) ? (DateTime?)null : rdr.GetDateTime(20),
+                    downloadUrl = rdr.IsDBNull(21) ? null : rdr.GetString(21),
+                    lastError = rdr.IsDBNull(22) ? null : rdr.GetString(22)
                 });
             }
 
             return Ok(list);
         }
+
+        [HttpGet("demo-renderer-info")]
+        public IActionResult GetDemoRendererInfo() => Ok(new
+        {
+            version = DemoRendererVersion,
+            build = DemoRendererBuild,
+            backgroundJobs = true,
+            shortVideoMode = "complete-story-all-modules",
+            sceneSynchronizedSpeech = DemoRendererScriptIsCurrent(),
+            rendererScriptFound = !string.IsNullOrWhiteSpace(ResolveDemoRendererScriptPath())
+        });
 
         [HttpPost("demo-jobs")]
         public async Task<IActionResult> CreateDemoJob([FromBody] DemoRenderJobDto dto)
@@ -261,8 +308,8 @@ LIMIT 50;";
 
             await using var cmd = new NpgsqlCommand(@"
 INSERT INTO public.""ProjectDemoRenderJobs""
-(""Id"", ""ProjectId"", ""Name"", ""Language"", ""Status"", ""OutputFileName"", ""FrameRate"", ""Resolution"", ""VoiceOver"", ""AppBaseUrl"", ""VoiceKey"", ""VoiceLabel"", ""TtsVoice"", ""TtsInstructions"", ""CaptureRoutes"", ""RendererRequirements"", ""RequestedById"", ""RequestedAtUtc"")
-VALUES (@id, @projectId, @name, @language, @status, @output, @frameRate, @resolution, @voiceOver, @appBaseUrl, @voiceKey, @voiceLabel, @ttsVoice, @ttsInstructions, @captureRoutes, @rendererRequirements, @requestedById, now())
+(""Id"", ""ProjectId"", ""Name"", ""Language"", ""Status"", ""OutputFileName"", ""FrameRate"", ""Resolution"", ""VoiceOver"", ""AppBaseUrl"", ""VoiceKey"", ""VoiceLabel"", ""TtsVoice"", ""TtsInstructions"", ""CaptureRoutes"", ""RendererRequirements"", ""DurationSeconds"", ""MusicStyle"", ""MusicVolume"", ""RequestedById"", ""RequestedAtUtc"")
+VALUES (@id, @projectId, @name, @language, @status, @output, @frameRate, @resolution, @voiceOver, @appBaseUrl, @voiceKey, @voiceLabel, @ttsVoice, @ttsInstructions, @captureRoutes, @rendererRequirements, @durationSeconds, @musicStyle, @musicVolume, @requestedById, now())
 ON CONFLICT (""Id"") DO UPDATE SET
     ""ProjectId"" = EXCLUDED.""ProjectId"",
     ""Name"" = EXCLUDED.""Name"",
@@ -279,13 +326,20 @@ ON CONFLICT (""Id"") DO UPDATE SET
     ""TtsInstructions"" = EXCLUDED.""TtsInstructions"",
     ""CaptureRoutes"" = EXCLUDED.""CaptureRoutes"",
     ""RendererRequirements"" = EXCLUDED.""RendererRequirements""
+    , ""DurationSeconds"" = EXCLUDED.""DurationSeconds""
+    , ""MusicStyle"" = EXCLUDED.""MusicStyle""
+    , ""MusicVolume"" = EXCLUDED.""MusicVolume""
+    , ""CompletedAtUtc"" = NULL
+    , ""DownloadUrl"" = NULL
+    , ""LastError"" = NULL
+WHERE ""ProjectDemoRenderJobs"".""Status"" IN ('queued', 'failed')
 RETURNING ""Id"";", conn);
 
             cmd.Parameters.AddWithValue("id", id);
             cmd.Parameters.AddWithValue("projectId", string.IsNullOrWhiteSpace(dto.ProjectId) ? (object)DBNull.Value : dto.ProjectId.Trim());
             cmd.Parameters.AddWithValue("name", string.IsNullOrWhiteSpace(dto.Name) ? "Mahima Application Demo Project" : dto.Name.Trim());
             cmd.Parameters.AddWithValue("language", dto.Language.Trim());
-            cmd.Parameters.AddWithValue("status", string.IsNullOrWhiteSpace(dto.Status) ? "queued" : dto.Status.Trim());
+            cmd.Parameters.AddWithValue("status", "queued");
             cmd.Parameters.AddWithValue("output", string.IsNullOrWhiteSpace(dto.Output) ? $"mahima-app-demo-{dto.Language.Trim()}.mp4" : dto.Output.Trim());
             cmd.Parameters.AddWithValue("frameRate", dto.FrameRate <= 0 ? 30 : dto.FrameRate);
             cmd.Parameters.AddWithValue("resolution", string.IsNullOrWhiteSpace(dto.Resolution) ? "1920x1080" : dto.Resolution.Trim());
@@ -297,11 +351,15 @@ RETURNING ""Id"";", conn);
             cmd.Parameters.AddWithValue("ttsInstructions", string.IsNullOrWhiteSpace(dto.TtsInstructions) ? (object)DBNull.Value : dto.TtsInstructions.Trim());
             cmd.Parameters.Add(new NpgsqlParameter("captureRoutes", NpgsqlDbType.Jsonb) { Value = ToJson(dto.CaptureRoutes) });
             cmd.Parameters.Add(new NpgsqlParameter("rendererRequirements", NpgsqlDbType.Jsonb) { Value = ToJson(dto.RendererRequirements) });
+            cmd.Parameters.AddWithValue("durationSeconds", Math.Clamp(dto.DurationSeconds <= 0 ? 90 : dto.DurationSeconds, 30, 1800));
+            cmd.Parameters.AddWithValue("musicStyle", NormalizeMusicStyle(dto.MusicStyle));
+            cmd.Parameters.AddWithValue("musicVolume", Math.Clamp(dto.MusicVolume, 0d, 0.6d));
             var userId = GetCurrentUserId();
             cmd.Parameters.AddWithValue("requestedById", userId == Guid.Empty ? (object)DBNull.Value : userId);
 
             var savedId = Convert.ToString(await cmd.ExecuteScalarAsync());
-            return Ok(new { id = savedId, status = dto.Status ?? "queued" });
+            if (string.IsNullOrWhiteSpace(savedId)) return Conflict(new { message = "This render is already running or completed. Prepare a new job to use different settings." });
+            return Ok(new { id = savedId, status = "queued" });
         }
 
 
@@ -321,7 +379,8 @@ RETURNING ""Id"";", conn);
             var lang = NormalizeDemoLanguage(language);
             var captureSetId = $"captures_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
             var webRoot = _env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot");
-            var captureRoot = Path.Combine(webRoot, "demo-captures", captureSetId);
+            if (!Guid.TryParse(User.FindFirstValue("tenant_id"), out var storageTenantId)) return Forbid();
+            var captureRoot = Path.Combine(webRoot, "demo-captures", storageTenantId.ToString("N"), captureSetId);
             Directory.CreateDirectory(captureRoot);
 
             var routes = new List<object>();
@@ -380,12 +439,15 @@ RETURNING ""Id"";", conn);
 
             var job = await LoadDemoJobPayloadAsync(conn, id);
             if (job == null) return NotFound(new { message = "Demo render job was not found." });
+            if (!string.Equals(Convert.ToString(job["status"]), "queued", StringComparison.OrdinalIgnoreCase))
+                return Conflict(new { message = "Only a newly queued job can be rendered. Prepare a new job and try again." });
+            if (!DemoRendererScriptIsCurrent())
+                return StatusCode(503, new { message = "The Demo Studio API and renderer script are different versions. Deploy the current renderer script before generating a video." });
 
             var token = ReadBearerToken();
             if (string.IsNullOrWhiteSpace(token)) return Unauthorized(new { message = "Render requires the current bearer token so Playwright can open protected pages." });
 
-            var webRoot = _env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot");
-            var outputRoot = Path.Combine(webRoot, "demo-videos", id);
+            var outputRoot = Path.Combine(ResolveDemoVideoRoot(), id);
             Directory.CreateDirectory(outputRoot);
 
             var scriptPath = ResolveDemoRendererScriptPath();
@@ -408,6 +470,7 @@ RETURNING ""Id"";", conn);
 
             var payload = new Dictionary<string, object?>
             {
+                ["rendererBuild"] = DemoRendererBuild,
                 ["job"] = job,
                 ["appBaseUrl"] = appBaseUrl.TrimEnd('/'),
                 ["authToken"] = token,
@@ -417,27 +480,51 @@ RETURNING ""Id"";", conn);
             var payloadPath = Path.Combine(outputRoot, "render-job.json");
             await System.IO.File.WriteAllTextAsync(payloadPath, JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
 
-            await UpdateDemoJobStatusAsync(conn, id, "rendering", null, null, null);
-
-            var result = await RunRendererAsync(scriptPath, payloadPath, outputRoot);
-            if (result.ExitCode != 0)
+            await using (var claim = new NpgsqlCommand(@"UPDATE public.""ProjectDemoRenderJobs"" SET ""Status"" = 'rendering', ""CompletedAtUtc"" = NULL, ""DownloadUrl"" = NULL, ""LastError"" = NULL WHERE ""Id"" = @id AND ""Status"" = 'queued'", conn))
             {
-                await UpdateDemoJobStatusAsync(conn, id, "failed", null, null, result.Output);
-                return StatusCode(500, new { message = "Demo MP4 render failed.", details = result.Output });
+                claim.Parameters.AddWithValue("id", id);
+                if (await claim.ExecuteNonQueryAsync() != 1) return Conflict(new { message = "This render has already started." });
             }
-
             var outputFileName = Convert.ToString(job["output"]) ?? $"mahima-app-demo-{job["language"]}.mp4";
             var outputPath = Path.Combine(outputRoot, outputFileName);
-            if (!System.IO.File.Exists(outputPath))
+            var downloadUrl = $"/api/projectmanagement/demo-jobs/{Uri.EscapeDataString(id)}/download";
+            _ = Task.Run(async () =>
             {
-                await UpdateDemoJobStatusAsync(conn, id, "failed", null, null, "Renderer finished but MP4 output was not found.");
-                return StatusCode(500, new { message = "Renderer finished but MP4 output was not found.", outputPath });
-            }
+                try
+                {
+                    var result = await RunRendererAsync(scriptPath, payloadPath, outputRoot);
+                    await using var backgroundConn = new NpgsqlConnection(_connStr);
+                    await backgroundConn.OpenAsync();
+                    if (result.ExitCode != 0)
+                    {
+                        var renderError = string.IsNullOrWhiteSpace(result.Output)
+                            ? $"The renderer process exited with code {result.ExitCode} without diagnostic output."
+                            : result.Output.Trim();
+                        await UpdateDemoJobStatusAsync(backgroundConn, id, "failed", null, null, renderError);
+                        _logger.LogError("Demo MP4 render {JobId} failed with exit code {ExitCode}: {RenderError}", id, result.ExitCode, renderError);
+                        return;
+                    }
+                    if (!System.IO.File.Exists(outputPath))
+                    {
+                        await UpdateDemoJobStatusAsync(backgroundConn, id, "failed", null, null, "Renderer finished but MP4 output was not found.");
+                        return;
+                    }
+                    await UpdateDemoJobStatusAsync(backgroundConn, id, "completed", downloadUrl, DateTime.UtcNow, null);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Background demo MP4 render {JobId} crashed.", id);
+                    try
+                    {
+                        await using var failureConn = new NpgsqlConnection(_connStr);
+                        await failureConn.OpenAsync();
+                        await UpdateDemoJobStatusAsync(failureConn, id, "failed", null, null, ex.Message);
+                    }
+                    catch (Exception statusEx) { _logger.LogError(statusEx, "Could not persist failed demo render status for {JobId}.", id); }
+                }
+            });
 
-            var downloadUrl = $"/demo-videos/{Uri.EscapeDataString(id)}/{Uri.EscapeDataString(outputFileName)}";
-            await UpdateDemoJobStatusAsync(conn, id, "completed", downloadUrl, DateTime.UtcNow, null);
-
-            return Ok(new { id, status = "completed", downloadUrl, outputFileName });
+            return Accepted(new { id, status = "rendering", durationSeconds = job["durationSeconds"], rendererVersion = DemoRendererVersion, rendererBuild = DemoRendererBuild, message = "MP4 rendering started. Demo Studio will update automatically.", outputFileName });
         }
 
 
@@ -451,19 +538,34 @@ RETURNING ""Id"";", conn);
             await EnsureSchemaAsync(conn);
 
             await using var cmd = new NpgsqlCommand(@"
-SELECT ""OutputFileName"", ""DownloadUrl""
+SELECT ""OutputFileName"", ""DownloadUrl"", ""Status"", ""LastError""
 FROM public.""ProjectDemoRenderJobs""
-WHERE ""Id"" = @id
-  AND ""Status"" = 'completed';", conn);
+WHERE ""Id"" = @id;", conn);
             cmd.Parameters.AddWithValue("id", id);
 
             string? outputFileName = null;
             string? downloadUrl = null;
+            string? status = null;
+            string? lastError = null;
             await using (var rdr = await cmd.ExecuteReaderAsync())
             {
-                if (!await rdr.ReadAsync()) return NotFound(new { message = "Completed demo MP4 was not found." });
+                if (!await rdr.ReadAsync()) return NotFound(new { message = "Demo render job was not found. Refresh Demo Studio and prepare a new job." });
                 outputFileName = rdr.IsDBNull(0) ? null : rdr.GetString(0);
                 downloadUrl = rdr.IsDBNull(1) ? null : rdr.GetString(1);
+                status = rdr.IsDBNull(2) ? null : rdr.GetString(2);
+                lastError = rdr.IsDBNull(3) ? null : rdr.GetString(3);
+            }
+
+            if (!string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase))
+            {
+                return Conflict(new
+                {
+                    message = string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase)
+                        ? "This MP4 render failed. Review the render error, correct the server dependency or AI configuration, and generate it again."
+                        : $"This MP4 is not ready for download. Current status: {status ?? "unknown"}.",
+                    status,
+                    lastError
+                });
             }
 
             if (string.IsNullOrWhiteSpace(outputFileName) && !string.IsNullOrWhiteSpace(downloadUrl))
@@ -473,11 +575,30 @@ WHERE ""Id"" = @id
 
             if (string.IsNullOrWhiteSpace(outputFileName)) outputFileName = $"mahima-app-demo-{id}.mp4";
 
-            var webRoot = _env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot");
-            var path = Path.Combine(webRoot, "demo-videos", id, outputFileName);
-            if (!System.IO.File.Exists(path)) return NotFound(new { message = "MP4 file is missing on disk.", path });
+            var path = Path.Combine(ResolveDemoVideoRoot(), id, outputFileName);
+            if (!System.IO.File.Exists(path))
+            {
+                var legacyWebRoot = _env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot");
+                var legacyPath = Path.Combine(legacyWebRoot, "demo-videos", id, outputFileName);
+                if (System.IO.File.Exists(legacyPath)) path = legacyPath;
+                else return NotFound(new
+                {
+                    message = "The render record is complete, but its MP4 file is missing. It may have been removed during deployment; generate this MP4 again.",
+                    status,
+                    expectedFileName = outputFileName
+                });
+            }
 
             return PhysicalFile(path, "video/mp4", outputFileName, enableRangeProcessing: true);
+        }
+
+        private string ResolveDemoVideoRoot()
+        {
+            var configured = _config["ProjectDemo:OutputRoot"];
+            if (!string.IsNullOrWhiteSpace(configured)) return Path.GetFullPath(configured.Trim());
+            if (OperatingSystem.IsLinux()) return "/var/lib/mahima/demo-videos";
+            var webRoot = _env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot");
+            return Path.Combine(webRoot, "demo-videos");
         }
 
         private async Task<string> GenerateCaptureNarrationAsync(string imagePath, string? contentType, string language, int index, string title)
@@ -570,6 +691,12 @@ WHERE ""Id"" = @id
             return value is "hi" or "pa" ? value : "en";
         }
 
+        private static string NormalizeMusicStyle(string? style)
+        {
+            var value = (style ?? "uplifting").Trim().ToLowerInvariant();
+            return value is "uplifting" or "peaceful" or "corporate" or "none" ? value : "uplifting";
+        }
+
         private static string FallbackCaptureNarration(string language, int index, string title) => language switch
         {
             "hi" => $"Screen {index} mein {title} dikhaya gaya hai, jisse ministry team apna kaam clearly track aur manage kar sakti hai.",
@@ -593,6 +720,14 @@ WHERE ""Id"" = @id
             return string.IsNullOrWhiteSpace(cleaned) ? "capture" : cleaned[..Math.Min(cleaned.Length, 60)];
         }
 
+        private bool DemoRendererScriptIsCurrent()
+        {
+            var script = ResolveDemoRendererScriptPath();
+            return script != null
+                && System.IO.File.Exists(Path.Combine(Path.GetDirectoryName(script)!, "story.js"))
+                && System.IO.File.ReadAllText(script).Contains($"const DEMO_RENDERER_BUILD = \"{DemoRendererBuild}\";", StringComparison.Ordinal);
+        }
+
         private string? ResolveDemoRendererScriptPath()
         {
             foreach (var candidate in GetDemoRendererScriptCandidates())
@@ -612,7 +747,8 @@ WHERE ""Id"" = @id
                 Path.Combine(_env.ContentRootPath, "Scripts", "DemoRenderer", "render-demo.js"),
                 Path.Combine(AppContext.BaseDirectory, "Scripts", "DemoRenderer", "render-demo.js"),
                 Path.Combine(Directory.GetCurrentDirectory(), "Scripts", "DemoRenderer", "render-demo.js"),
-                "/root/Mahima_App_V4.0/backend/Mahima.Api.v3.clean/Scripts/DemoRenderer/render-demo.js"
+                "/opt/mahima-api/Scripts/DemoRenderer/render-demo.js",
+                "/root/Mahima_App_V4.1/backend/Mahima.Api.v3.clean/Scripts/DemoRenderer/render-demo.js"
             };
 
             return candidates
@@ -624,7 +760,7 @@ WHERE ""Id"" = @id
         private async Task<Dictionary<string, object?>?> LoadDemoJobPayloadAsync(NpgsqlConnection conn, string id)
         {
             await using var cmd = new NpgsqlCommand(@"
-SELECT ""Id"", ""ProjectId"", ""Name"", ""Language"", ""Status"", ""OutputFileName"", ""FrameRate"", ""Resolution"", ""VoiceOver"", ""AppBaseUrl"", ""VoiceKey"", ""VoiceLabel"", ""TtsVoice"", ""TtsInstructions"", ""CaptureRoutes""::text, ""RendererRequirements""::text
+SELECT ""Id"", ""ProjectId"", ""Name"", ""Language"", ""Status"", ""OutputFileName"", ""FrameRate"", ""Resolution"", ""VoiceOver"", ""AppBaseUrl"", ""VoiceKey"", ""VoiceLabel"", ""TtsVoice"", ""TtsInstructions"", ""CaptureRoutes""::text, ""RendererRequirements""::text, ""DurationSeconds"", ""MusicStyle"", ""MusicVolume""
 FROM public.""ProjectDemoRenderJobs""
 WHERE ""Id"" = @id;", conn);
             cmd.Parameters.AddWithValue("id", id);
@@ -650,7 +786,10 @@ WHERE ""Id"" = @id;", conn);
                 ["ttsInstructions"] = rdr.IsDBNull(13) ? null : rdr.GetString(13),
                 ["requireOpenAiSpeech"] = true,
                 ["captureRoutes"] = JsonElementFrom(rdr.GetString(14)),
-                ["rendererRequirements"] = JsonElementFrom(rdr.GetString(15))
+                ["rendererRequirements"] = JsonElementFrom(rdr.GetString(15)),
+                ["durationSeconds"] = rdr.GetInt32(16),
+                ["musicStyle"] = rdr.GetString(17),
+                ["musicVolume"] = rdr.GetDouble(18)
             };
         }
 
@@ -704,7 +843,10 @@ WHERE ""Id"" = @id;", conn);
             if (!string.IsNullOrWhiteSpace(_config["ProjectDemo:OpenAiBaseUrl"])) psi.Environment["OPENAI_BASE_URL"] = _config["ProjectDemo:OpenAiBaseUrl"];
             else if (!string.IsNullOrWhiteSpace(_config["PastorBot:BaseUrl"])) psi.Environment["OPENAI_BASE_URL"] = _config["PastorBot:BaseUrl"];
             psi.Environment["OPENAI_TTS_MODEL"] = _config["ProjectDemo:TtsModel"] ?? "gpt-4o-mini-tts";
+            psi.Environment["OPENAI_VISION_MODEL"] = _config["ProjectDemo:VisionModel"] ?? _config["PastorBot:VisionModel"] ?? "gpt-4o-mini";
             if (!string.IsNullOrWhiteSpace(_config["ProjectDemo:TtsInstructions"])) psi.Environment["OPENAI_TTS_INSTRUCTIONS"] = _config["ProjectDemo:TtsInstructions"];
+            if (!string.IsNullOrWhiteSpace(_config["ProjectDemo:BackgroundMusicPath"])) psi.Environment["DEMO_BACKGROUND_MUSIC_PATH"] = _config["ProjectDemo:BackgroundMusicPath"];
+            if (!string.IsNullOrWhiteSpace(_config["ProjectDemo:BackgroundMusicVolume"])) psi.Environment["DEMO_BACKGROUND_MUSIC_VOLUME"] = _config["ProjectDemo:BackgroundMusicVolume"];
 
             using var process = new Process { StartInfo = psi };
             var output = new StringBuilder();
@@ -715,8 +857,16 @@ WHERE ""Id"" = @id;", conn);
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
-            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(Math.Max(1, timeoutMinutes)));
-            return (process.ExitCode, output.ToString());
+            try
+            {
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(Math.Max(1, timeoutMinutes)));
+                return (process.ExitCode, output.ToString());
+            }
+            catch (TimeoutException)
+            {
+                try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
+                return (-1, $"Demo rendering exceeded the {timeoutMinutes}-minute server limit and was stopped. Try a shorter duration or fewer capture routes.\n{output}");
+            }
         }
 
         private string? ReadBearerToken()
@@ -808,6 +958,9 @@ WHERE ""Id"" = @id;", conn);
             public string? VoiceLabel { get; set; }
             public string? TtsVoice { get; set; }
             public string? TtsInstructions { get; set; }
+            public int DurationSeconds { get; set; } = 90;
+            public string? MusicStyle { get; set; }
+            public double MusicVolume { get; set; } = 0.35;
             public JsonElement? CaptureRoutes { get; set; }
             public JsonElement? RendererRequirements { get; set; }
         }
