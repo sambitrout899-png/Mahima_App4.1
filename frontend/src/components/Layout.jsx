@@ -1120,7 +1120,7 @@ const visibleGroups = NAV_GROUPS
                     <select value={activePositionId} onChange={onPositionChange} aria-label="Active position">
                       {userPositions.map((position) => (
                         <option key={position.id} value={position.id}>
-                          {position.name} - {position.isPrimary ? "Primary" : "Secondary"} - {scopeLabel(position.visibilityScope)}
+                          {position.name} ({position.isPrimary ? "Primary" : "Secondary"})
                         </option>
                       ))}
                     </select>
