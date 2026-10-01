@@ -13,7 +13,7 @@ function initialsFor(name = "") {
     .join("");
 }
 
-function resolveLogoUrl(src = "") {
+export function resolveLogoUrl(src = "") {
   const value = String(src || "").trim();
   if (!value) return "";
   if (/^(https?:|data:|blob:)/i.test(value)) return value;

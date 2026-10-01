@@ -24,6 +24,7 @@ namespace Mahima.Api.v3.clean.Controllers
         private readonly string? _connectionString;
         private readonly ILogger<PositionsController> _logger;
         private readonly IHostEnvironment _env;
+        private static readonly Guid RootTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
 
         public PositionsController(IConfiguration configuration, ILogger<PositionsController> logger, IHostEnvironment env)
         {
@@ -48,6 +49,11 @@ namespace Mahima.Api.v3.clean.Controllers
             public bool IsPrimary { get; set; }
         }
 
+        public class PositionParentDto
+        {
+            public long? ParentPositionId { get; set; }
+        }
+
         [HttpGet]
         public async Task<IActionResult> GetAll()
         {
@@ -57,7 +63,7 @@ namespace Mahima.Api.v3.clean.Controllers
                 await using var conn = new NpgsqlConnection(_connectionString);
                 await conn.OpenAsync();
                 await EnsurePositionTablesAsync(conn);
-                var items = await LoadPositionsAsync(conn);
+                var items = await LoadPositionsAsync(conn, CurrentTenantId());
                 return Ok(new { items, total = items.Count });
             }
             catch (Exception ex)
@@ -65,6 +71,28 @@ namespace Mahima.Api.v3.clean.Controllers
                 _logger.LogError(ex, "Error loading positions.");
                 return _env.IsDevelopment() ? StatusCode(500, ex.ToString()) : StatusCode(500, "Error loading positions.");
             }
+        }
+
+        [HttpPut("{id:long}/parent")]
+        [Authorize(Roles = "admin,ADMIN")]
+        public async Task<IActionResult> UpdateParent(long id, [FromBody] PositionParentDto dto)
+        {
+            if (string.IsNullOrWhiteSpace(_connectionString)) return StatusCode(500, "Missing connection string 'DefaultConnection'.");
+            await using var conn = new NpgsqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await EnsurePositionTablesAsync(conn);
+            var tenantId = CurrentTenantId();
+            if (await WouldCreateHierarchyCycleAsync(conn, tenantId, id, dto.ParentPositionId))
+                return BadRequest("A position cannot report to itself or one of its descendants.");
+            await using var cmd = new NpgsqlCommand(@"
+UPDATE public.positions
+SET parent_position_id = @parent, updated_at_utc = now()
+WHERE id = @id AND tenant_id = @tenant_id
+  AND (@parent IS NULL OR EXISTS (SELECT 1 FROM public.positions parent WHERE parent.id = @parent AND parent.tenant_id = @tenant_id));", conn);
+            cmd.Parameters.AddWithValue("id", NpgsqlDbType.Bigint, id);
+            cmd.Parameters.AddWithValue("tenant_id", NpgsqlDbType.Uuid, tenantId);
+            cmd.Parameters.AddWithValue("parent", NpgsqlDbType.Bigint, dto.ParentPositionId.HasValue ? dto.ParentPositionId.Value : DBNull.Value);
+            return await cmd.ExecuteNonQueryAsync() == 0 ? NotFound() : NoContent();
         }
 
         [HttpPost]
@@ -78,10 +106,13 @@ namespace Mahima.Api.v3.clean.Controllers
                 await using var conn = new NpgsqlConnection(_connectionString);
                 await conn.OpenAsync();
                 await EnsurePositionTablesAsync(conn);
+                var tenantId = CurrentTenantId();
                 await using var cmd = new NpgsqlCommand(@"
-INSERT INTO public.positions (name, description, parent_position_id, visibility_scope, is_active, created_at_utc, updated_at_utc)
-VALUES (@name, @description, @parent, @scope, @active, now(), now())
+INSERT INTO public.positions (tenant_id, name, description, parent_position_id, visibility_scope, is_active, created_at_utc, updated_at_utc)
+SELECT @tenant_id, @name, @description, @parent, @scope, @active, now(), now()
+WHERE @parent IS NULL OR EXISTS (SELECT 1 FROM public.positions WHERE id = @parent AND tenant_id = @tenant_id)
 RETURNING id;", conn);
+                cmd.Parameters.AddWithValue("tenant_id", NpgsqlDbType.Uuid, tenantId);
                 cmd.Parameters.AddWithValue("name", NpgsqlDbType.Text, dto.Name.Trim());
                 cmd.Parameters.AddWithValue("description", NpgsqlDbType.Text, string.IsNullOrWhiteSpace(dto.Description) ? (object)DBNull.Value : dto.Description.Trim());
                 cmd.Parameters.AddWithValue("parent", NpgsqlDbType.Bigint, dto.ParentPositionId.HasValue ? (object)dto.ParentPositionId.Value : DBNull.Value);
@@ -108,6 +139,9 @@ RETURNING id;", conn);
                 await using var conn = new NpgsqlConnection(_connectionString);
                 await conn.OpenAsync();
                 await EnsurePositionTablesAsync(conn);
+                var tenantId = CurrentTenantId();
+                if (await WouldCreateHierarchyCycleAsync(conn, tenantId, id, dto.ParentPositionId))
+                    return BadRequest("A position cannot report to itself or one of its descendants.");
                 await using var cmd = new NpgsqlCommand(@"
 UPDATE public.positions
 SET name = @name,
@@ -116,8 +150,10 @@ SET name = @name,
     visibility_scope = @scope,
     is_active = @active,
     updated_at_utc = now()
-WHERE id = @id;", conn);
+WHERE id = @id AND tenant_id = @tenant_id
+  AND (NULLIF(@parent, 0) IS NULL OR EXISTS (SELECT 1 FROM public.positions parent WHERE parent.id = NULLIF(@parent, 0) AND parent.tenant_id = @tenant_id));", conn);
                 cmd.Parameters.AddWithValue("id", NpgsqlDbType.Bigint, id);
+                cmd.Parameters.AddWithValue("tenant_id", NpgsqlDbType.Uuid, tenantId);
                 cmd.Parameters.AddWithValue("name", NpgsqlDbType.Text, dto.Name.Trim());
                 cmd.Parameters.AddWithValue("description", NpgsqlDbType.Text, string.IsNullOrWhiteSpace(dto.Description) ? (object)DBNull.Value : dto.Description.Trim());
                 cmd.Parameters.AddWithValue("parent", NpgsqlDbType.Bigint, dto.ParentPositionId.HasValue && dto.ParentPositionId.Value != id ? dto.ParentPositionId.Value : 0L);
@@ -143,8 +179,9 @@ WHERE id = @id;", conn);
                 await using var conn = new NpgsqlConnection(_connectionString);
                 await conn.OpenAsync();
                 await EnsurePositionTablesAsync(conn);
-                await using var cmd = new NpgsqlCommand("UPDATE public.positions SET is_active = false, updated_at_utc = now() WHERE id = @id;", conn);
+                await using var cmd = new NpgsqlCommand("UPDATE public.positions SET is_active = false, updated_at_utc = now() WHERE id = @id AND tenant_id = @tenant_id;", conn);
                 cmd.Parameters.AddWithValue("id", NpgsqlDbType.Bigint, id);
+                cmd.Parameters.AddWithValue("tenant_id", NpgsqlDbType.Uuid, CurrentTenantId());
                 var rows = await cmd.ExecuteNonQueryAsync();
                 return rows == 0 ? NotFound() : NoContent();
             }
@@ -172,9 +209,12 @@ SELECT up.user_id, up.position_id, up.is_primary, up.assigned_at_utc,
 FROM public.user_positions up
 JOIN public.positions p ON p.id = up.position_id
 JOIN public.users u ON u.id = up.user_id
-WHERE (@user_id IS NULL OR up.user_id = @user_id)
+WHERE p.tenant_id = @tenant_id
+  AND u.tenant_id = @tenant_id
+  AND (@user_id IS NULL OR up.user_id = @user_id)
 ORDER BY COALESCE(u.displayname, u.username), up.is_primary DESC, p.name;";
                 await using var cmd = new NpgsqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("tenant_id", NpgsqlDbType.Uuid, CurrentTenantId());
                 cmd.Parameters.AddWithValue("user_id", NpgsqlDbType.Uuid, userId.HasValue ? (object)userId.Value : DBNull.Value);
                 var items = new List<object>();
                 await using var rdr = await cmd.ExecuteReaderAsync();
@@ -212,8 +252,11 @@ ORDER BY COALESCE(u.displayname, u.username), up.is_primary DESC, p.name;";
                 await using var conn = new NpgsqlConnection(_connectionString);
                 await conn.OpenAsync();
                 await EnsurePositionTablesAsync(conn);
-                var targetScope = await LoadPositionScopeAsync(conn, dto.PositionId);
+                var tenantId = CurrentTenantId();
+                var targetScope = await LoadPositionScopeAsync(conn, tenantId, dto.PositionId);
                 if (targetScope == null) return BadRequest("Position not found.");
+                if (!await UserBelongsToTenantAsync(conn, dto.UserId, tenantId))
+                    return BadRequest("The selected user does not belong to this tenant.");
                 if (targetScope.Equals("ChurchLevel", StringComparison.OrdinalIgnoreCase) && !await UserHasAdminRoleAsync(conn, dto.UserId))
                 {
                     return BadRequest("Church Level positions can only be assigned to admin users.");
@@ -221,8 +264,12 @@ ORDER BY COALESCE(u.displayname, u.username), up.is_primary DESC, p.name;";
                 await using var tx = await conn.BeginTransactionAsync();
                 if (dto.IsPrimary)
                 {
-                    await using var clear = new NpgsqlCommand("UPDATE public.user_positions SET is_primary = false WHERE user_id = @user_id;", conn, tx);
+                    await using var clear = new NpgsqlCommand(@"UPDATE public.user_positions up
+SET is_primary = false
+FROM public.positions p
+WHERE up.position_id = p.id AND up.user_id = @user_id AND p.tenant_id = @tenant_id;", conn, tx);
                     clear.Parameters.AddWithValue("user_id", NpgsqlDbType.Uuid, dto.UserId);
+                    clear.Parameters.AddWithValue("tenant_id", NpgsqlDbType.Uuid, tenantId);
                     await clear.ExecuteNonQueryAsync();
                 }
                 await using var cmd = new NpgsqlCommand(@"
@@ -254,9 +301,14 @@ DO UPDATE SET is_primary = EXCLUDED.is_primary;", conn, tx);
                 await using var conn = new NpgsqlConnection(_connectionString);
                 await conn.OpenAsync();
                 await EnsurePositionTablesAsync(conn);
-                await using var cmd = new NpgsqlCommand("DELETE FROM public.user_positions WHERE user_id = @user_id AND position_id = @position_id;", conn);
+                await using var cmd = new NpgsqlCommand(@"DELETE FROM public.user_positions up
+USING public.positions p, public.users u
+WHERE up.position_id = p.id AND up.user_id = u.id
+  AND up.user_id = @user_id AND up.position_id = @position_id
+  AND p.tenant_id = @tenant_id AND u.tenant_id = @tenant_id;", conn);
                 cmd.Parameters.AddWithValue("user_id", NpgsqlDbType.Uuid, userId);
                 cmd.Parameters.AddWithValue("position_id", NpgsqlDbType.Bigint, positionId);
+                cmd.Parameters.AddWithValue("tenant_id", NpgsqlDbType.Uuid, CurrentTenantId());
                 var rows = await cmd.ExecuteNonQueryAsync();
                 return rows == 0 ? NotFound() : NoContent();
             }
@@ -299,7 +351,7 @@ DO UPDATE SET is_primary = EXCLUDED.is_primary;", conn, tx);
 
                 if (!await UserHasAdminRoleAsync(conn, userId)) return Forbid();
 
-                var assigned = await BackfillDefaultMemberPositionsAsync(conn);
+                var assigned = await BackfillDefaultMemberPositionsAsync(conn, CurrentTenantId());
                 return Ok(new
                 {
                     defaultPosition = "Member",
@@ -314,6 +366,26 @@ DO UPDATE SET is_primary = EXCLUDED.is_primary;", conn, tx);
         }
 
         private Guid CurrentUserId() => Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub"), out var id) ? id : Guid.Empty;
+        private Guid CurrentTenantId() => Guid.TryParse(User.FindFirstValue("tenant_id"), out var id) ? id : RootTenantId;
+
+        private static async Task<bool> WouldCreateHierarchyCycleAsync(NpgsqlConnection conn, Guid tenantId, long positionId, long? parentPositionId)
+        {
+            if (!parentPositionId.HasValue) return false;
+            if (parentPositionId.Value == positionId) return true;
+            await using var cmd = new NpgsqlCommand(@"
+WITH RECURSIVE descendants AS (
+    SELECT id FROM public.positions WHERE parent_position_id = @positionId AND tenant_id = @tenant_id
+    UNION ALL
+    SELECT p.id FROM public.positions p
+    JOIN descendants d ON p.parent_position_id = d.id
+    WHERE p.tenant_id = @tenant_id
+)
+SELECT EXISTS (SELECT 1 FROM descendants WHERE id = @parentPositionId);", conn);
+            cmd.Parameters.AddWithValue("positionId", NpgsqlDbType.Bigint, positionId);
+            cmd.Parameters.AddWithValue("parentPositionId", NpgsqlDbType.Bigint, parentPositionId.Value);
+            cmd.Parameters.AddWithValue("tenant_id", NpgsqlDbType.Uuid, tenantId);
+            return Convert.ToBoolean(await cmd.ExecuteScalarAsync());
+        }
 
         private static string NormalizeScope(string? value)
         {
@@ -336,7 +408,7 @@ DO UPDATE SET is_primary = EXCLUDED.is_primary;", conn, tx);
                 await using var cmd = new NpgsqlCommand(@"
 CREATE TABLE IF NOT EXISTS public.positions (
     id bigserial PRIMARY KEY,
-    name text NOT NULL UNIQUE,
+    name text NOT NULL,
     description text NULL,
     parent_position_id bigint NULL REFERENCES public.positions(id) ON DELETE SET NULL,
     visibility_scope text NOT NULL DEFAULT 'My',
@@ -344,6 +416,11 @@ CREATE TABLE IF NOT EXISTS public.positions (
     created_at_utc timestamp with time zone NOT NULL DEFAULT now(),
     updated_at_utc timestamp with time zone NOT NULL DEFAULT now()
 );
+
+ALTER TABLE public.positions
+    ADD COLUMN IF NOT EXISTS tenant_id uuid NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001';
+
+ALTER TABLE public.positions DROP CONSTRAINT IF EXISTS positions_name_key;
 
 CREATE TABLE IF NOT EXISTS public.user_positions (
     user_id uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
@@ -354,34 +431,35 @@ CREATE TABLE IF NOT EXISTS public.user_positions (
 );
 
 CREATE INDEX IF NOT EXISTS ix_positions_parent ON public.positions(parent_position_id);
+CREATE INDEX IF NOT EXISTS ix_positions_tenant ON public.positions(tenant_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_positions_tenant_name ON public.positions(tenant_id, lower(name));
 CREATE INDEX IF NOT EXISTS ix_user_positions_user ON public.user_positions(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_user_positions_primary ON public.user_positions(user_id) WHERE is_primary;
 
-INSERT INTO public.positions (name, description, visibility_scope)
-SELECT 'Member', 'Default personal data visibility for ordinary members.', 'My'
+INSERT INTO public.positions (tenant_id, name, description, visibility_scope)
+SELECT t.id, 'Member', 'Default personal data visibility for ordinary members.', 'My'
+FROM public.tenants t
 WHERE NOT EXISTS (
     SELECT 1
-    FROM public.positions
-    WHERE lower(name) = lower('Member')
+    FROM public.positions p
+    WHERE p.tenant_id = t.id AND lower(p.name) = lower('Member')
 )
-ON CONFLICT (name) DO UPDATE
-SET description = COALESCE(public.positions.description, EXCLUDED.description),
-    visibility_scope = EXCLUDED.visibility_scope,
-    is_active = true,
-    updated_at_utc = now();
+ON CONFLICT (tenant_id, lower(name)) DO NOTHING;
 
-INSERT INTO public.positions (name, description, visibility_scope)
-SELECT 'Call Center Manager', 'Receives prayer follow-up alerts and coordinates prayer response handling.', 'MyTeams'
+INSERT INTO public.positions (tenant_id, name, description, visibility_scope)
+SELECT t.id, 'Call Center Manager', 'Receives prayer follow-up alerts and coordinates prayer response handling.', 'MyTeams'
+FROM public.tenants t
 WHERE NOT EXISTS (
     SELECT 1
-    FROM public.positions
-    WHERE lower(regexp_replace(name, '[^a-z0-9]+', '', 'g')) IN ('callcentermanager', 'callcentremanager')
+    FROM public.positions p
+    WHERE p.tenant_id = t.id
+      AND lower(regexp_replace(p.name, '[^a-z0-9]+', '', 'g')) IN ('callcentermanager', 'callcentremanager')
 )
-ON CONFLICT (name) DO UPDATE
-SET description = COALESCE(public.positions.description, EXCLUDED.description),
-    visibility_scope = EXCLUDED.visibility_scope,
-    is_active = true,
-    updated_at_utc = now();
+ON CONFLICT (tenant_id, lower(name)) DO NOTHING;
+
+DELETE FROM public.user_positions up
+USING public.users u, public.positions p
+WHERE up.user_id = u.id AND up.position_id = p.id AND u.tenant_id <> p.tenant_id;
 ", conn);
                 await cmd.ExecuteNonQueryAsync();
                 PositionSchemaReady = true;
@@ -392,20 +470,22 @@ SET description = COALESCE(public.positions.description, EXCLUDED.description),
             }
         }
 
-        public static async Task<int> BackfillDefaultMemberPositionsAsync(NpgsqlConnection conn)
+        public static async Task<int> BackfillDefaultMemberPositionsAsync(NpgsqlConnection conn, Guid? requestedTenantId = null)
         {
             await EnsurePositionTablesAsync(conn);
-            var memberPositionId = await EnsureMemberPositionAsync(conn);
+            var tenantId = requestedTenantId ?? RootTenantId;
+            var memberPositionId = await EnsureMemberPositionAsync(conn, tenantId);
             await using var cmd = new NpgsqlCommand(@"
 INSERT INTO public.user_positions (user_id, position_id, is_primary, assigned_at_utc)
 SELECT u.id, @member_position_id, true, now()
 FROM public.users u
-WHERE NOT EXISTS (
+WHERE u.tenant_id = @tenant_id AND NOT EXISTS (
     SELECT 1
     FROM public.user_positions up
     WHERE up.user_id = u.id
 );", conn);
             cmd.Parameters.AddWithValue("member_position_id", NpgsqlDbType.Bigint, memberPositionId);
+            cmd.Parameters.AddWithValue("tenant_id", NpgsqlDbType.Uuid, tenantId);
             return await cmd.ExecuteNonQueryAsync();
         }
 
@@ -413,7 +493,9 @@ WHERE NOT EXISTS (
         {
             if (userId == Guid.Empty) return;
             await EnsurePositionTablesAsync(conn);
-            var memberPositionId = await EnsureMemberPositionAsync(conn);
+            var tenantId = await LoadUserTenantIdAsync(conn, userId);
+            if (!tenantId.HasValue) return;
+            var memberPositionId = await EnsureMemberPositionAsync(conn, tenantId.Value);
 
             await using (var existing = new NpgsqlCommand("SELECT EXISTS (SELECT 1 FROM public.user_positions WHERE user_id = @user_id);", conn))
             {
@@ -431,10 +513,11 @@ SET is_primary = true;", conn);
             await assign.ExecuteNonQueryAsync();
         }
 
-        private static async Task<long> EnsureMemberPositionAsync(NpgsqlConnection conn)
+        private static async Task<long> EnsureMemberPositionAsync(NpgsqlConnection conn, Guid tenantId)
         {
-            await using (var select = new NpgsqlCommand("SELECT id FROM public.positions WHERE lower(name) = lower('Member') LIMIT 1;", conn))
+            await using (var select = new NpgsqlCommand("SELECT id FROM public.positions WHERE tenant_id = @tenant_id AND lower(name) = lower('Member') LIMIT 1;", conn))
             {
+                select.Parameters.AddWithValue("tenant_id", NpgsqlDbType.Uuid, tenantId);
                 var existing = await select.ExecuteScalarAsync();
                 if (existing != null && existing != DBNull.Value)
                 {
@@ -452,24 +535,37 @@ WHERE id = @id;", conn);
             }
 
             await using var upsert = new NpgsqlCommand(@"
-INSERT INTO public.positions (name, description, visibility_scope, is_active)
-VALUES ('Member', 'Default personal data visibility for ordinary members.', 'My', true)
-ON CONFLICT (name) DO UPDATE
+INSERT INTO public.positions (tenant_id, name, description, visibility_scope, is_active)
+VALUES (@tenant_id, 'Member', 'Default personal data visibility for ordinary members.', 'My', true)
+ON CONFLICT (tenant_id, lower(name)) DO UPDATE
 SET visibility_scope = EXCLUDED.visibility_scope,
     is_active = true,
     updated_at_utc = now()
 RETURNING id;", conn);
+            upsert.Parameters.AddWithValue("tenant_id", NpgsqlDbType.Uuid, tenantId);
             var id = await upsert.ExecuteScalarAsync();
             return Convert.ToInt64(id);
         }
 
-        private static async Task<string?> LoadPositionScopeAsync(NpgsqlConnection conn, long positionId)
+        private static async Task<string?> LoadPositionScopeAsync(NpgsqlConnection conn, Guid tenantId, long positionId)
         {
-            await using var cmd = new NpgsqlCommand("SELECT visibility_scope FROM public.positions WHERE id = @id AND is_active = true;", conn);
+            await using var cmd = new NpgsqlCommand("SELECT visibility_scope FROM public.positions WHERE id = @id AND tenant_id = @tenant_id AND is_active = true;", conn);
             cmd.Parameters.AddWithValue("id", NpgsqlDbType.Bigint, positionId);
+            cmd.Parameters.AddWithValue("tenant_id", NpgsqlDbType.Uuid, tenantId);
             var value = await cmd.ExecuteScalarAsync();
             return value?.ToString();
         }
+
+        private static async Task<Guid?> LoadUserTenantIdAsync(NpgsqlConnection conn, Guid userId)
+        {
+            await using var cmd = new NpgsqlCommand("SELECT tenant_id FROM public.users WHERE id = @user_id LIMIT 1;", conn);
+            cmd.Parameters.AddWithValue("user_id", NpgsqlDbType.Uuid, userId);
+            var value = await cmd.ExecuteScalarAsync();
+            return value is Guid tenantId ? tenantId : null;
+        }
+
+        private static async Task<bool> UserBelongsToTenantAsync(NpgsqlConnection conn, Guid userId, Guid tenantId) =>
+            await LoadUserTenantIdAsync(conn, userId) == tenantId;
 
         private static async Task<bool> UserHasAdminRoleAsync(NpgsqlConnection conn, Guid userId)
         {
@@ -501,7 +597,7 @@ SELECT EXISTS (
             cmd.Parameters.AddWithValue("user_id", NpgsqlDbType.Uuid, userId);
             return await cmd.ExecuteScalarAsync() is bool assignedAdmin && assignedAdmin;
         }
-        private static async Task<List<object>> LoadPositionsAsync(NpgsqlConnection conn)
+        private static async Task<List<object>> LoadPositionsAsync(NpgsqlConnection conn, Guid tenantId)
         {
             var items = new List<object>();
             await using var cmd = new NpgsqlCommand(@"
@@ -511,8 +607,10 @@ SELECT p.id, p.name, p.description, p.parent_position_id, parent.name AS parent_
 FROM public.positions p
 LEFT JOIN public.positions parent ON parent.id = p.parent_position_id
 LEFT JOIN public.user_positions up ON up.position_id = p.id
+WHERE p.tenant_id = @tenant_id
 GROUP BY p.id, parent.name
 ORDER BY COALESCE(parent.name, p.name), p.name;", conn);
+            cmd.Parameters.AddWithValue("tenant_id", NpgsqlDbType.Uuid, tenantId);
             await using var rdr = await cmd.ExecuteReaderAsync();
             while (await rdr.ReadAsync())
             {
@@ -536,6 +634,8 @@ ORDER BY COALESCE(parent.name, p.name), p.name;", conn);
         public static async Task<List<object>> LoadUserPositionsAsync(NpgsqlConnection conn, Guid userId)
         {
             await EnsurePositionTablesAsync(conn);
+            var tenantId = await LoadUserTenantIdAsync(conn, userId);
+            if (!tenantId.HasValue) return new List<object>();
             var items = new List<object>();
             await using (var cmd = new NpgsqlCommand(@"
 SELECT p.id, p.name, p.description, p.parent_position_id, parent.name AS parent_name,
@@ -543,10 +643,11 @@ SELECT p.id, p.name, p.description, p.parent_position_id, parent.name AS parent_
 FROM public.user_positions up
 JOIN public.positions p ON p.id = up.position_id AND p.is_active = true
 LEFT JOIN public.positions parent ON parent.id = p.parent_position_id
-WHERE up.user_id = @user_id
+WHERE up.user_id = @user_id AND p.tenant_id = @tenant_id
 ORDER BY up.is_primary DESC, p.name;", conn))
             {
                 cmd.Parameters.AddWithValue("user_id", NpgsqlDbType.Uuid, userId);
+                cmd.Parameters.AddWithValue("tenant_id", NpgsqlDbType.Uuid, tenantId.Value);
                 await using var rdr = await cmd.ExecuteReaderAsync();
                 while (await rdr.ReadAsync())
                 {
@@ -564,7 +665,8 @@ ORDER BY up.is_primary DESC, p.name;", conn))
             }
             if (items.Count == 0)
             {
-                await using var fallback = new NpgsqlCommand("SELECT id, name, description, visibility_scope FROM public.positions WHERE name = 'Member' LIMIT 1;", conn);
+                await using var fallback = new NpgsqlCommand("SELECT id, name, description, visibility_scope FROM public.positions WHERE tenant_id = @tenant_id AND lower(name) = lower('Member') LIMIT 1;", conn);
+                fallback.Parameters.AddWithValue("tenant_id", NpgsqlDbType.Uuid, tenantId.Value);
                 await using var fr = await fallback.ExecuteReaderAsync();
                 if (await fr.ReadAsync())
                 {

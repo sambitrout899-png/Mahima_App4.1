@@ -162,7 +162,7 @@ export default function ForgotPasswordModal({ open, onClose }) {
               Cancel
             </button>
             <button type="submit" className="btn" disabled={busy} style={{ background: "#0b2a47", color: "white", padding: "8px 12px" }}>
-              {busy ? "Workingâ€¦" : "Change password"}
+              {busy ? "Working…" : "Change password"}
             </button>
           </div>
         </form>

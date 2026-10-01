@@ -9,12 +9,18 @@ import {
   RefreshCw,
   Search,
   Download,
+  Save,
+  Trash2,
 } from "lucide-react";
 import {
   applyBillingInvoicePayment,
+  deleteBillingInvoice,
+  deleteBillingInvoicePeriod,
   generateBillingInvoices,
+  getBillingSettings,
   listBillingInvoices,
   markPaymentPaid,
+  saveBillingSettings,
 } from "../../api/multiTenantApi";
 import { QR_URL, money, printDonationInvoice } from "./invoicePrint";
 
@@ -40,6 +46,9 @@ export default function BillingCenterPage() {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [billingDay, setBillingDay] = useState(1);
+  const [proRata, setProRata] = useState(false);
+  const [replaceExisting, setReplaceExisting] = useState(false);
   const [paymentDraft, setPaymentDraft] = useState({ invoiceId: "", amountInr: "", providerPaymentId: "", note: "" });
 
   async function load() {
@@ -63,6 +72,12 @@ export default function BillingCenterPage() {
     load();
   }, [month, status]);
 
+  useEffect(() => {
+    getBillingSettings()
+      .then((result) => setBillingDay(Number(result?.billingDay) || 1))
+      .catch((error) => setMessage(error?.message || "Could not load billing settings."));
+  }, []);
+
   const filteredInvoices = useMemo(() => {
     const q = search.trim().toLowerCase();
     const invoices = Array.isArray(data.items) ? data.items : [];
@@ -84,11 +99,75 @@ export default function BillingCenterPage() {
     setBusy(true);
     setMessage("");
     try {
-      const result = await generateBillingInvoices({ month });
-      setMessage(`Generated ${result?.created ?? 0} invoice(s) for ${month}.`);
+      const result = await generateBillingInvoices({ month, proRata, replaceExisting, billingDay });
+      setMessage(`${replaceExisting ? "Regenerated" : "Generated"} ${result?.created ?? 0} invoice(s) for ${month}${proRata ? " on a pro-rata basis" : ""}.`);
       await load();
     } catch (error) {
       setMessage(error?.message || "Could not generate invoices.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveSettings() {
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await saveBillingSettings({ billingDay: Number(billingDay) });
+      setBillingDay(Number(result?.billingDay) || 1);
+      setMessage(`Billing day saved as day ${result?.billingDay}.`);
+    } catch (error) {
+      setMessage(error?.message || "Could not save billing settings.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deletePeriod() {
+    if (!window.confirm(`Permanently delete every invoice for ${month}, including paid invoices and payment links?`)) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await deleteBillingInvoicePeriod({ month });
+      setMessage(`Deleted ${result?.deleted ?? 0} unpaid invoice(s) for ${month}.`);
+      await load();
+    } catch (error) {
+      setMessage(error?.message || "Could not delete invoices.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function generateTenantBill(invoice, replace) {
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await generateBillingInvoices({
+        month,
+        tenantId: invoice.tenantId,
+        proRata,
+        replaceExisting: replace,
+        billingDay,
+      });
+      setMessage(`${replace ? "Regenerated" : "Generated"} ${invoice.tenantName || invoice.tenantSlug} bill for ${month}.`);
+      await load();
+    } catch (error) {
+      setMessage(error?.message || "Could not generate tenant invoice.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function dropTenantBill(invoice) {
+    if (!window.confirm(`Permanently drop ${invoice.invoiceNumber} for ${invoice.tenantName || invoice.tenantSlug}?`)) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      await deleteBillingInvoice(invoice.id);
+      setMessage(`Dropped ${invoice.invoiceNumber}.`);
+      await load();
+    } catch (error) {
+      setMessage(error?.message || "Could not drop invoice.");
     } finally {
       setBusy(false);
     }
@@ -163,7 +242,10 @@ export default function BillingCenterPage() {
             </button>
             <button type="button" onClick={generate} disabled={busy} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-emerald-700 px-3 py-2 text-sm font-black text-white hover:bg-emerald-800 disabled:opacity-60">
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-              Generate Bills
+              {replaceExisting ? "Regenerate Bills" : "Generate Bills"}
+            </button>
+            <button type="button" onClick={deletePeriod} disabled={busy} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-black text-rose-700 hover:bg-rose-100 disabled:opacity-60">
+              <Trash2 className="h-4 w-4" /> Delete Period
             </button>
           </div>
         </div>
@@ -200,6 +282,28 @@ export default function BillingCenterPage() {
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Church, invoice, package" className="min-h-10 w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm font-bold outline-none ring-emerald-100 focus:ring-4" />
             </div>
           </label>
+        </div>
+        <div className="mt-4 flex flex-wrap items-end gap-4 border-t border-slate-100 pt-4">
+          <label className="text-sm font-black text-slate-700">
+            Billing day
+            <div className="mt-1 flex gap-2">
+              <input type="number" min="1" max="28" value={billingDay} onChange={(e) => setBillingDay(e.target.value)} className="min-h-10 w-24 rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold outline-none ring-emerald-100 focus:ring-4" />
+              <button type="button" onClick={saveSettings} disabled={busy || Number(billingDay) < 1 || Number(billingDay) > 28} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50 disabled:opacity-60">
+                <Save className="h-3.5 w-3.5" /> Save
+              </button>
+            </div>
+          </label>
+          <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-black text-slate-700">
+            <input type="checkbox" checked={proRata} onChange={(e) => setProRata(e.target.checked)} className="h-4 w-4 accent-emerald-700" />
+            Pro-rata active days
+          </label>
+          <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-black text-amber-800">
+            <input type="checkbox" checked={replaceExisting} onChange={(e) => setReplaceExisting(e.target.checked)} className="h-4 w-4 accent-amber-700" />
+            Replace unpaid invoices
+          </label>
+          <p className="max-w-xl text-xs font-semibold leading-5 text-slate-500">
+            Billing periods start on the selected day. Pro-rata charges each package only for its active days. Delete and replace operations remove all matching invoices, including paid records.
+          </p>
         </div>
       </section>
 
@@ -263,7 +367,7 @@ export default function BillingCenterPage() {
 
       <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
         <div className="overflow-x-auto">
-          <table className="min-w-[1120px] table-fixed text-sm">
+          <table className="min-w-[1320px] table-fixed text-sm">
             <thead className="bg-slate-50 text-xs font-black uppercase tracking-wide text-slate-500">
               <tr className="text-left">
                 <th className="w-56 px-4 py-3">Invoice</th>
@@ -273,14 +377,15 @@ export default function BillingCenterPage() {
                 <th className="w-32 px-4 py-3 text-right">Paid</th>
                 <th className="w-32 px-4 py-3 text-right">Balance</th>
                 <th className="w-32 px-4 py-3">Status</th>
+                <th className="w-56 px-4 py-3">Bill Actions</th>
                 <th className="w-80 px-4 py-3">Donation Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={8} className="px-4 py-10 text-center font-bold text-slate-500">Loading invoices...</td></tr>
+                <tr><td colSpan={9} className="px-4 py-10 text-center font-bold text-slate-500">Loading invoices...</td></tr>
               ) : filteredInvoices.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-10 text-center font-bold text-slate-500">No invoices found for this filter.</td></tr>
+                <tr><td colSpan={9} className="px-4 py-10 text-center font-bold text-slate-500">No invoices found for this filter.</td></tr>
               ) : filteredInvoices.map((invoice) => {
                 const draftOpen = paymentDraft.invoiceId === invoice.id;
                 return (
@@ -311,6 +416,19 @@ export default function BillingCenterPage() {
                       <span className={`rounded-full px-3 py-1 text-xs font-black ${invoice.status === "paid" ? "bg-emerald-50 text-emerald-800" : invoice.status === "partial" ? "bg-amber-50 text-amber-800" : "bg-slate-100 text-slate-700"}`}>
                         {invoice.status || "open"}
                       </span>
+                    </td>
+                    <td className="px-4 py-4">
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" onClick={() => generateTenantBill(invoice, false)} disabled={busy} className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs font-black text-emerald-800 hover:bg-emerald-100 disabled:opacity-50">
+                          <FileText className="h-3.5 w-3.5" /> Generate
+                        </button>
+                        <button type="button" onClick={() => generateTenantBill(invoice, true)} disabled={busy} className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs font-black text-amber-800 hover:bg-amber-100 disabled:opacity-50">
+                          <RefreshCw className="h-3.5 w-3.5" /> Regenerate
+                        </button>
+                        <button type="button" onClick={() => dropTenantBill(invoice)} disabled={busy} className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-xs font-black text-rose-700 hover:bg-rose-100 disabled:opacity-50">
+                          <Trash2 className="h-3.5 w-3.5" /> Drop
+                        </button>
+                      </div>
                     </td>
                     <td className="px-4 py-4">
                       <PaymentRecordList records={invoice.paymentRecords} />

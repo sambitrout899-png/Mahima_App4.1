@@ -2,7 +2,7 @@
 export const API_BASE =
   typeof window !== 'undefined' && window.__API_BASE__
     ? window.__API_BASE__
-    : 'https://mahimaministries.in/api';
+    : 'https://beta.mahimaministries.in/api';
 
 export const SIGNALR_HUB_URL = API_BASE.replace('/api', '') + '/hubs/chat';
 

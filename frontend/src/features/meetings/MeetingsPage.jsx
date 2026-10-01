@@ -93,7 +93,7 @@ export default function MeetingsPage() {
         </div>
       )}
 
-      {loading && <div>Loadingâ€¦</div>}
+      {loading && <div>Loading…</div>}
       {error && <div className="text-red-700 mb-4">Error: {error}</div>}
 
       <div className="overflow-x-auto bg-white rounded shadow-sm">

@@ -2,16 +2,8 @@
 import { CalendarDays, CloudSun, ExternalLink, Globe2, MapPin, Megaphone, Newspaper, Quote, Radio, RefreshCw, ShieldAlert, Sparkles, Zap } from "lucide-react";
 import { apiFetch } from "../utils/fetch-auth-shim";
 
-const CACHE_KEY = "mahima_today_update_v2";
-const CACHE_MAX_AGE_MS = 30 * 60 * 1000;
-
-const FAITH_QUOTES = [
-  { by: "Billy Graham", text: "My home is in Heaven. I'm just traveling through this world." },
-  { by: "Billy Graham", text: "Courage is contagious." },
-  { by: "Corrie ten Boom", text: "Never be afraid to trust an unknown future to a known God." },
-  { by: "C. S. Lewis", text: "There are far, far better things ahead than any we leave behind." },
-  { by: "Augustine", text: "Pray as though everything depended on God." },
-];
+const CACHE_KEY = "mahima_today_update_v3";
+const CACHE_MAX_AGE_MS = 20 * 60 * 1000;
 
 function hasLiveUpdateData(data) {
   return Boolean(
@@ -126,6 +118,7 @@ export default function TodayUpdateCorner() {
         params.set("lat", String(position.lat));
         params.set("lon", String(position.lon));
       }
+      if (force) params.set("refresh", "true");
 
       const suffix = params.toString() ? `?${params}` : "";
       const result = await apiFetch(`/today-updates${suffix}`, { timeoutMs: 22000 });
@@ -159,6 +152,7 @@ export default function TodayUpdateCorner() {
   const feelsLike = roundValue(weather?.feelsLikeC);
   const articles = Array.isArray(data?.christianUpdate?.articles) ? data.christianUpdate.articles : [];
   const israelWatch = Array.isArray(data?.israelWatch) ? data.israelWatch : [];
+  const faithItems = Array.isArray(data?.christianUpdate?.faithItems) ? data.christianUpdate.faithItems : [];
   const topArticle = articles.find((article) => articleUrl(article)) || israelWatch.find((article) => articleUrl(article));
 
   const tickerItems = useMemo(() => {
@@ -211,13 +205,22 @@ export default function TodayUpdateCorner() {
       });
     });
 
-    FAITH_QUOTES.forEach((quote, index) => {
+    faithItems.forEach((message, index) => {
       items.push({
-        key: `quote-${index}`,
+        key: `faith-${index}`,
         tone: "quote",
-        label: `${quote.by}: "${quote.text}"`,
+        label: String(message).trim(),
       });
     });
+
+    if (data?.generatedAtUtc) {
+      const generatedAt = new Date(data.generatedAtUtc);
+      if (!Number.isNaN(generatedAt.getTime())) items.push({
+        key: "updated-at",
+        tone: "faith",
+        label: `Faith Wire refreshed ${generatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+      });
+    }
 
     if (error) {
       items.push({
@@ -228,7 +231,7 @@ export default function TodayUpdateCorner() {
     }
 
     return items.filter((item) => item.label);
-  }, [articles, data, error, feelsLike, israelWatch, loading, location, temp, weather]);
+  }, [articles, data, error, faithItems, feelsLike, israelWatch, loading, location, temp, weather]);
 
   const marqueeItems = tickerItems.length ? [...tickerItems, ...tickerItems] : [];
 

@@ -23,7 +23,7 @@ const pastorModes = {
     language: "en",
     persona: "english-evangelist",
     title: "English Pastor",
-    voiceLabel: "Classic English pastoral voice",
+    voiceLabel: "English pastoral voice",
     placeholder: "Ask for prayer, guidance, a Bible verse, or daily direction...",
     greeting:
       "Jai Masih. I am here to listen, encourage you from Scripture, and help you take the next faithful step.",
@@ -36,7 +36,7 @@ const pastorModes = {
   },
   hi: {
     language: "hi",
-    persona: "hindi-pastoral-guide",
+    persona: "hindi-evangelist",
     title: "Hindi Pastor",
     voiceLabel: "Hindi pastoral guide voice",
     placeholder: "प्रार्थना, मार्गदर्शन, बाइबल वचन या आज की दिशा पूछें...",
@@ -307,23 +307,23 @@ export default function PastorPage() {
             </div>
           </div>
 
-          <div className="mt-5 grid grid-cols-2 gap-3">
+          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {Object.entries(pastorModes).map(([key, item]) => (
               <button
                 key={key}
                 type="button"
                 onClick={() => switchMode(key)}
-                className={`rounded-2xl border px-4 py-4 text-left transition ${
+                className={`flex min-w-0 w-full flex-col items-stretch overflow-visible whitespace-normal rounded-2xl border px-4 py-4 text-left transition ${
                   mode === key
                     ? "border-emerald-600 bg-emerald-50 text-emerald-950"
                     : "border-amber-200 bg-white text-slate-700 hover:bg-amber-50"
                 }`}
               >
-                <div className="flex items-center gap-2 text-sm font-black">
-                  <Languages className="h-4 w-4" />
-                  {item.title}
+                <div className="flex min-w-0 items-center gap-2 text-sm font-black">
+                  <Languages className="h-4 w-4 shrink-0" />
+                  <span className="min-w-0 break-words">{item.title}</span>
                 </div>
-                <div className="mt-1 text-xs font-semibold text-slate-500">{item.voiceLabel}</div>
+                <div className="mt-1 whitespace-normal break-words text-xs font-semibold leading-5 text-slate-500">{item.voiceLabel}</div>
               </button>
             ))}
           </div>

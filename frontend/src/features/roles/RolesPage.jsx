@@ -225,14 +225,14 @@ export default function RolesPage() {
     <div className="roles-wrap">
       {Styles}
       {/* Header */}
-      <div className="roles-header" role="region" aria-label="Roles header">
+      <div className="roles-header mahima-standard-page-header" data-mahima-explicit-header="true" role="region" aria-label="Roles header">
         <div style={{ display:"flex", gap:12, alignItems:"center", flex:1 }}>
           <div className="role-avatar" aria-hidden>
             <IconRoles />
           </div>
           <div>
-            <div className="roles-title">Roles</div>
-            <div className="subtitle">Create roles and assign which pages each role can access.</div>
+            <h1 className="roles-title mahima-standard-page-title" data-mahima-explicit-title="true">Roles</h1>
+            <div className="subtitle mahima-standard-page-subtitle">Create roles and assign which pages each role can access.</div>
           </div>
         </div>
         <div style={{ minWidth: 260, flex:1 }}>

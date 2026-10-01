@@ -1,0 +1,117 @@
+.prayer-wall-page {
+  position: relative;
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 8% 8%, rgba(168, 85, 247, .2), transparent 28rem),
+    radial-gradient(circle at 92% 14%, rgba(14, 165, 233, .2), transparent 28rem),
+    radial-gradient(circle at 50% 92%, rgba(245, 158, 11, .14), transparent 30rem),
+    linear-gradient(135deg, #f5f3ff, #ecfeff 48%, #fffbeb) !important;
+}
+
+.prayer-wall-page::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: .16;
+  background-image: url('/assets/global-church-vibrant-v2.png');
+  background-position: center;
+  background-size: cover;
+}
+
+.prayer-admin-shell,
+.prayer-member-shell {
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.72) !important;
+  border-radius: 28px !important;
+  background: rgba(255,255,255,.84) !important;
+  box-shadow: 0 28px 80px rgba(30,41,59,.16), 0 1px 0 rgba(255,255,255,.9) inset !important;
+  backdrop-filter: blur(18px);
+}
+
+.prayer-wall-hero,
+.prayer-member-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background:
+    linear-gradient(110deg, rgba(15,23,42,.82), rgba(6,78,59,.64) 47%, rgba(76,29,149,.7)),
+    url('/assets/global-church-vibrant-v2.png') center 45% / cover !important;
+}
+
+.prayer-wall-hero::before,
+.prayer-member-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(circle at 15% 20%, rgba(250,204,21,.32), transparent 24rem),
+    radial-gradient(circle at 86% 18%, rgba(56,189,248,.28), transparent 23rem);
+}
+
+.prayer-wall-hero::after,
+.prayer-member-hero::after {
+  content: "";
+  position: absolute;
+  left: 4%;
+  right: 4%;
+  bottom: -2px;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, #fbbf24, #34d399, #60a5fa, #a78bfa, transparent);
+  box-shadow: 0 0 24px rgba(251,191,36,.6);
+}
+
+.prayer-member-hero { color:#fff; padding:clamp(26px,4vw,48px) !important; }
+.prayer-member-hero h1 { color:#fff !important; font-size:clamp(30px,4vw,48px) !important; letter-spacing:-.04em; }
+.prayer-member-hero p { color:rgba(236,253,245,.9) !important; font-size:15px !important; }
+.prayer-member-hero > div > div:first-child { background:linear-gradient(135deg,#fef3c7,#d1fae5) !important; color:#065f46 !important; box-shadow:0 12px 30px rgba(251,191,36,.24); }
+
+.prayer-content-grid {
+  grid-template-columns: minmax(0, 1fr) !important;
+  background: linear-gradient(135deg, rgba(255,255,255,.86), rgba(248,250,252,.72));
+}
+
+.prayer-compose-card,
+.prayer-track-card {
+  border-color: rgba(16,185,129,.2) !important;
+  border-radius: 22px !important;
+  background: linear-gradient(145deg, rgba(255,255,255,.98), rgba(240,253,250,.92)) !important;
+  box-shadow: 0 18px 44px rgba(6,78,59,.1) !important;
+}
+
+.prayer-compose-card { position:sticky; top:76px; }
+.prayer-compose-card textarea { background:linear-gradient(145deg,#fff,#f0fdfa) !important; }
+.prayer-compose-card button[type="submit"] { background:linear-gradient(110deg,#047857,#0d9488 55%,#2563eb) !important; box-shadow:0 14px 28px rgba(13,148,136,.24) !important; }
+
+.prayer-wall-page :where(article, section) { border-radius:18px; }
+.prayer-wall-page article { transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+.prayer-wall-page article:hover { transform:translateY(-2px); border-color:rgba(139,92,246,.28) !important; box-shadow:0 15px 32px rgba(76,29,149,.1); }
+
+.prayer-wall-page :where(button):not(:disabled) { transition:transform .16s ease, filter .16s ease, box-shadow .16s ease; }
+.prayer-wall-page :where(button):not(:disabled):hover { filter:saturate(1.12); }
+.prayer-wall-page :where(button[class*="bg-emerald"],button[class*="bg-indigo"],button[class*="bg-slate-950"]):not(:disabled):hover { transform:translateY(-1px); }
+
+.prayer-wall-page :where(input,textarea,select):focus { border-color:rgba(139,92,246,.48) !important; box-shadow:0 0 0 4px rgba(139,92,246,.1) !important; }
+
+@media (max-width:1023px) {
+  .prayer-compose-card { position:relative; top:auto; }
+}
+
+@media (max-width:640px) {
+  .prayer-wall-page > div { padding-left:10px !important; padding-right:10px !important; }
+  .prayer-admin-shell,.prayer-member-shell { border-radius:20px !important; }
+  .prayer-wall-hero { padding:22px 16px !important; }
+  .prayer-member-hero { padding:28px 18px !important; }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  .prayer-wall-page :where(*) { transition-duration:.001ms !important; }
+}
+
+@media print {
+  .prayer-wall-page,.prayer-wall-page::before,.prayer-wall-hero,.prayer-member-hero { background:#fff !important; color:#000 !important; }
+  .prayer-compose-card { position:static; }
+}

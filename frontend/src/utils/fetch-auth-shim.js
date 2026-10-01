@@ -1,5 +1,7 @@
 // src/utils/fetch-auth-shim.js
 import { activePositionHeaderValue } from "./positionContext";
+import { mobileClientHeaders } from "./mobileAccessPolicy";
+import { readSharedAuthToken, writeSharedAuthToken } from "./sharedAuthCookie";
 
 /* ---------------- API BASE ---------------- */
 function resolveApiBase() {
@@ -29,7 +31,7 @@ function resolveApiBase() {
       if (isNative) {
         base =
           import.meta.env.VITE_MOBILE_API_BASE ||
-          "https://mahimaministries.in/api";
+          "https://beta.mahimaministries.in/api";
       }
     }
   } catch {}
@@ -42,7 +44,7 @@ function resolveApiBase() {
   return base.toString().trim().replace(/\/+$/, "");
 }
 
-const PUBLIC_API_BASE = "https://mahimaministries.in/api";
+const PUBLIC_API_BASE = "https://beta.mahimaministries.in/api";
 const API_BASE = resolveApiBase();
 console.log("FINAL API BASE =", API_BASE);
 const TENANT_SLUG_KEY = "mahima_tenant_slug";
@@ -135,10 +137,30 @@ function readToken() {
       readJsonToken("mahima_currentUser") ||
       readJsonToken("currentUser");
 
-    return normalizeToken(raw || "");
+    if (raw) return normalizeToken(raw);
+
+    // Nothing in this origin's localStorage yet -- this can happen the first time a
+    // sibling subdomain (app./www./beta.) is visited after logging in on another one.
+    // Seed this origin's localStorage from the shared cross-subdomain cookie so every
+    // other localStorage-reading call site in the app keeps working unchanged.
+    const shared = normalizeToken(readSharedAuthToken());
+    if (shared) {
+      localStorage.setItem("mahima_token", shared);
+      localStorage.setItem("authToken", shared);
+      localStorage.setItem("token", shared);
+      return shared;
+    }
+
+    return "";
   } catch {
     return "";
   }
+}
+
+// Re-exported so login/token-write call sites can seed the shared cookie without each
+// needing to import sharedAuthCookie.js directly.
+export function persistSharedAuthToken(token) {
+  writeSharedAuthToken(normalizeToken(token));
 }
 
 /* ---------------- URL BUILDER ---------------- */
@@ -157,15 +179,17 @@ function isNativeAppMode() {
 
 function buildUrlWithBase(url, base) {
   if (!url) return url;
-  if (/^https?:\/\//i.test(url)) return url;
+  const deduplicateApiPath = (value) =>
+    String(value).replace(/\/api(?:\/api)+(?=\/|[?#]|$)/gi, "/api");
+  if (/^https?:\/\//i.test(url)) return deduplicateApiPath(url);
 
-  const normalized = url.startsWith("/") ? url : `/${url}`;
+  const normalized = deduplicateApiPath(url.startsWith("/") ? url : `/${url}`);
   const cleanBase = String(base || API_BASE).trim().replace(/\/+$/, "");
   if (normalized.toLowerCase().startsWith("/api/") && cleanBase.toLowerCase().endsWith("/api")) {
-    return cleanBase + normalized.slice(4);
+    return deduplicateApiPath(cleanBase + normalized.slice(4));
   }
 
-  return cleanBase + normalized;
+  return deduplicateApiPath(cleanBase + normalized);
 }
 
 function buildUrl(url) {
@@ -178,7 +202,15 @@ async function readErrorBody(res) {
 
   try {
     const json = JSON.parse(text);
-    return json?.message || json?.error || json?.title || text;
+    const summary = json?.message || json?.error || json?.detail || json?.title;
+    const technicalDetails = json?.details || json?.lastError;
+    if (summary && technicalDetails && technicalDetails !== summary) {
+      return `${summary}\n\n${technicalDetails}`;
+    }
+    if (json?.detail && json?.title && json.detail !== json.title) {
+      return `${json.title}: ${json.detail}`;
+    }
+    return summary || text;
   } catch {
     return text;
   }
@@ -242,6 +274,7 @@ export async function apiFetch(input, init = {}) {
   } = init || {};
   const finalUrl = buildUrl(url);
   const headers = new Headers(fetchInit.headers || {});
+  Object.entries(mobileClientHeaders()).forEach(([key, value]) => headers.set(key, value));
   const tenantSlug = activeTenantSlug();
   if (tenantSlug && !headers.has("X-Tenant-Slug") && !headers.has("X-Tenant-Id")) {
     headers.set("X-Tenant-Slug", tenantSlug);
@@ -343,6 +376,7 @@ export async function apiFetchBlob(input, init = {}) {
   } = init || {};
   const finalUrl = buildUrl(url);
   const headers = new Headers(fetchInit.headers || {});
+  Object.entries(mobileClientHeaders()).forEach(([key, value]) => headers.set(key, value));
   const token = readToken();
 
   if (token && !skipAuth) {
@@ -438,43 +472,42 @@ export async function apiFetchJson(input, init = {}) {
 }
 
 /* ---------------- AUTH APIs ---------------- */
-export function register(data) {
+export function register(data, tenantSlug = "") {
   return apiFetchJson("/auth/register", {
     method: "POST",
     skipAuth: true,
     retryPublicApi: true,
-    headers: { "Content-Type": "application/json", ...tenantHeaders() },
+    headers: { "Content-Type": "application/json", ...(tenantSlug ? { "X-Tenant-Slug": tenantSlug } : tenantHeaders()) },
     body: JSON.stringify(data),
   });
 }
 
-export function login(data) {
+export function login(data, tenantSlug = "") {
   return apiFetchJson("/auth/login", {
     method: "POST",
     skipAuth: true,
     retryPublicApi: true,
-    headers: { "Content-Type": "application/json", ...tenantHeaders() },
+    headers: { "Content-Type": "application/json", ...(tenantSlug ? { "X-Tenant-Slug": tenantSlug } : tenantHeaders()) },
     body: JSON.stringify(data),
   });
 }
 
-export function googleLogin(data) {
+export function mfaLoginVerify(data, tenantSlug = "") {
+  return apiFetchJson("/auth/mfa/login-verify", {
+    method: "POST",
+    skipAuth: true,
+    retryPublicApi: true,
+    headers: { "Content-Type": "application/json", ...(tenantSlug ? { "X-Tenant-Slug": tenantSlug } : tenantHeaders()) },
+    body: JSON.stringify(data),
+  });
+}
+
+export function googleLogin(data, tenantSlug = "") {
   return apiFetchJson("/auth/google", {
     method: "POST",
     skipAuth: true,
     retryPublicApi: true,
-    headers: { "Content-Type": "application/json", ...tenantHeaders() },
+    headers: { "Content-Type": "application/json", ...(tenantSlug ? { "X-Tenant-Slug": tenantSlug } : tenantHeaders()) },
     body: JSON.stringify(data),
   });
 }
-
-export function googleLogin(data) {
-  return apiFetchJson("/auth/google", {
-    method: "POST",
-    skipAuth: true,
-    retryPublicApi: true,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-}
-

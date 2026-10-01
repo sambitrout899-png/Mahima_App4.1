@@ -2,7 +2,7 @@
 //
 // WhatsApp-style conversation view for Jai Masih.
 // Features:
-//   - Lucide icons (no mojibake â† âœ"âœ" âž¤ ðŸ’¬)
+//   - Lucide icons (no text-encoded icon glyphs)
 //   - Sound + haptic on incoming messages (chatNotifications.js)
 //   - Date separators (Today / Yesterday / DD MMM YYYY)
 //   - Read receipts (single tick / double tick / blue double tick)
@@ -71,7 +71,7 @@ const API_BASE = (() => {
         Boolean(window.Capacitor?.isNativePlatform?.()) ||
         window.location?.protocol === "capacitor:" ||
         (window.location?.protocol === "https:" && window.location?.hostname === "localhost");
-      if (isNative) return "https://mahimaministries.in/api";
+      if (isNative) return "https://beta.mahimaministries.in/api";
     }
   } catch {}
 

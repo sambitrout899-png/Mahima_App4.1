@@ -31,6 +31,7 @@ namespace Mahima.Api.v3.clean.Controllers
         private const string EmailClientPageKey = "EMAIL_CLIENT";
         private const string Mask = "********";
         private const long MaxTotalAttachmentBytes = 50L * 1024L * 1024L;
+        private const long MaxInlineImageBytes = 8L * 1024L * 1024L;
         private readonly MahimaDbContext _db;
         private readonly IDataProtector _protector;
         private readonly IConfiguration _config;
@@ -883,7 +884,7 @@ namespace Mahima.Api.v3.clean.Controllers
                     Date = message.Date != default ? message.Date : null,
                     Seen = true,
                     HasAttachments = attachments.Count > 0,
-                    HtmlBody = message.HtmlBody ?? "",
+                    HtmlBody = ResolveInlineImages(message),
                     TextBody = message.TextBody ?? "",
                     Attachments = attachments
                 };
@@ -893,6 +894,39 @@ namespace Mahima.Api.v3.clean.Controllers
                 if (client.IsConnected)
                     await client.DisconnectAsync(true, cancellationToken);
             }
+        }
+
+        private static string ResolveInlineImages(MimeMessage message)
+        {
+            var html = message.HtmlBody ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(html))
+                return html;
+
+            long embeddedBytes = 0;
+            foreach (var part in message.BodyParts.OfType<MimePart>())
+            {
+                if (part.Content == null ||
+                    string.IsNullOrWhiteSpace(part.ContentId) ||
+                    !string.Equals(part.ContentType.MediaType, "image", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                using var memory = new MemoryStream();
+                part.Content.DecodeTo(memory);
+                if (memory.Length == 0 || embeddedBytes + memory.Length > MaxInlineImageBytes)
+                    continue;
+
+                embeddedBytes += memory.Length;
+                var mimeType = part.ContentType.MimeType ?? "image/png";
+                var dataUrl = $"data:{mimeType};base64,{Convert.ToBase64String(memory.ToArray())}";
+                var contentId = part.ContentId.Trim().Trim('<', '>');
+
+                html = html.Replace($"cid:{contentId}", dataUrl, StringComparison.OrdinalIgnoreCase);
+                html = html.Replace($"cid:{Uri.EscapeDataString(contentId)}", dataUrl, StringComparison.OrdinalIgnoreCase);
+            }
+
+            return html;
         }
 
         private static async Task<EmailAttachmentDownload?> FetchAttachmentAsync(EmailClientSettingsDto settings, string folderName, UniqueId uid, int index, CancellationToken cancellationToken)

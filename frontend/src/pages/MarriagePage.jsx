@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { API_BASE } from "../api";
 import { getToken } from "../features/auth/authService";
 import { createWorkflowStyles } from "./ministryWorkflowStyles";
+import { printMinistryToken } from "../utils/printMinistryToken";
+import { resolveLogoUrl } from "../components/TenantLogo";
 
 const TABS = [
   { key: "", label: "All", tone: "#0f172a" },
@@ -205,7 +207,7 @@ export default function MarriagePage() {
     setScheduleModal({
       id: item.id,
       scheduledAt: item.scheduledAt ? item.scheduledAt.slice(0, 16) : "",
-      ceremonyLocation: item.ceremonyLocation || "Mahima Ministry Church, Punjab",
+      ceremonyLocation: item.ceremonyLocation || "",
     });
   }
 
@@ -296,6 +298,11 @@ export default function MarriagePage() {
     const marriageDate = item.scheduledAt || item.preferredDate || item.createdAt;
     const formattedMarriageDate = formatDateOnly(marriageDate);
     const formattedIssueDate = formatDateOnly(new Date().toISOString());
+    const printTemplate = window.__mahimaPrintTemplate || {};
+    const organizationName = printTemplate.organizationName || "Church";
+    const templateAddress = printTemplate.address || "";
+    const templateLogo = printTemplate.showLogo !== false ? resolveLogoUrl(printTemplate.logoUrl || "") : "";
+    const primaryColor = printTemplate.primaryColor || "#123a63";
 
     const html = `<!DOCTYPE html>
 <html>
@@ -307,7 +314,8 @@ export default function MarriagePage() {
   .page { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 22mm 20mm; background: white; box-sizing: border-box; }
   .frame { border: 8px double #8b5e34; padding: 22px; min-height: 245mm; }
   .header { text-align: center; border-bottom: 2px solid #8b5e34; padding-bottom: 14px; }
-  .church { font-size: 24px; font-weight: 900; letter-spacing: .08em; color: #123a63; }
+  .church { font-size: 24px; font-weight: 900; letter-spacing: .08em; color: ${escapeHtml(primaryColor)}; }
+  .logo { display:block; max-width:100px; max-height:64px; object-fit:contain; margin:0 auto 8px; }
   .sub { margin-top: 4px; font-size: 12px; color: #64748b; }
   .title { text-align: center; margin: 32px 0 18px; font-size: 22px; font-weight: 800; text-transform: uppercase; text-decoration: underline; color: #7c2d12; }
   .meta { display: flex; justify-content: space-between; font-size: 12px; margin: 10px 0; }
@@ -326,8 +334,10 @@ export default function MarriagePage() {
 <div class="page">
   <div class="frame">
     <div class="header">
-      <div class="church">MAHIMA MINISTRY CHURCH, PUNJAB</div>
-      <div class="sub">Restoration | Healing | Mission - Pastoral and Marriage Ministry</div>
+      ${templateLogo ? `<img class="logo" src="${escapeHtml(templateLogo)}" alt="Logo" />` : ""}
+      <div class="church">${escapeHtml(organizationName)}</div>
+      <div class="sub">${escapeHtml(printTemplate.headerText || "Pastoral and Marriage Ministry")}</div>
+      ${printTemplate.showAddress !== false && templateAddress ? `<div class="sub">${escapeHtml(templateAddress)}</div>` : ""}
     </div>
 
     <div class="title">Provisional Marriage Certificate</div>
@@ -337,13 +347,13 @@ export default function MarriagePage() {
       <div><strong>Date of Issue:</strong> ${escapeHtml(formattedIssueDate)}</div>
     </div>
     <div class="meta">
-      <div><strong>Church Location:</strong> ${escapeHtml(item.ceremonyLocation || "Mahima Ministry Church, Punjab")}</div>
+      <div><strong>Church Location:</strong> ${escapeHtml(item.ceremonyLocation || printTemplate.address || "To be confirmed")}</div>
       <div><strong>Marriage Date:</strong> ${escapeHtml(formattedMarriageDate)}</div>
     </div>
 
     <div class="body">
       This is to certify that, according to the marriage records of
-      <strong>Mahima Ministry Church</strong>, the Christian marriage of
+      <strong>${escapeHtml(organizationName)}</strong>, the Christian marriage of
       <span class="names">${escapeHtml(item.groomFullName || "________________")}</span>
       and
       <span class="names">${escapeHtml(item.brideFullName || "________________")}</span>
@@ -382,7 +392,7 @@ export default function MarriagePage() {
     </div>
 
     <div class="disclaimer">
-      This provisional certificate is issued by Mahima Ministry Church, Punjab for pastoral and church-record purposes only.
+      This provisional certificate is issued by ${escapeHtml(organizationName)} for pastoral and church-record purposes only.
       It is not a replacement for the civil marriage certificate issued by the competent government authority.
     </div>
   </div>
@@ -465,9 +475,7 @@ export default function MarriagePage() {
                 onClick={() => setActiveTab(tab.key)}
                 style={{
                   ...styles.tab,
-                  background: active ? tab.tone : "#ffffff",
-                  color: active ? "#ffffff" : "#334155",
-                  boxShadow: active ? `0 12px 24px ${tab.tone}33` : "none",
+                  ...(active ? styles.activeTab : {}),
                 }}
               >
                 {tab.label}
@@ -529,6 +537,11 @@ export default function MarriagePage() {
                       <td style={{ ...styles.td, textAlign: "right" }}>
                         <div style={styles.actionGroup}>
                           {renderActions(m)}
+                          {m.token && (
+                            <button type="button" onClick={() => printMinistryToken({ ministry: "Marriage", token: m.token, personName: m.groomFullName, companionName: m.brideFullName, date: m.scheduledAt || m.preferredDate, location: m.ceremonyLocation, status: m.status })} style={styles.actionButton("#7c3aed")}>
+                              Print Token
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => handleDelete(m.id)}
@@ -689,7 +702,7 @@ function CertificateModal({ item, onClose, onPrint }) {
         <ModalHeader title="Provisional Marriage Certificate" onClose={onClose} />
 
         <div style={styles.certificatePreview}>
-          <div style={styles.certHeader}>MAHIMA MINISTRY CHURCH, PUNJAB</div>
+          <div style={styles.certHeader}>{(window.__mahimaPrintTemplate?.organizationName || "Church").toUpperCase()}</div>
           <div style={styles.certSub}>Restoration | Healing | Mission - Marriage Ministry</div>
           <div style={styles.certTitle}>Provisional Marriage Certificate</div>
 
@@ -697,7 +710,7 @@ function CertificateModal({ item, onClose, onPrint }) {
             This certifies that <strong>{item.groomFullName}</strong> and{" "}
             <strong>{item.brideFullName}</strong> were united in Christian marriage on{" "}
             <strong>{formatDateOnly(item.scheduledAt || item.preferredDate || item.createdAt)}</strong>{" "}
-            at <strong>{item.ceremonyLocation || "Mahima Ministry Church"}</strong>.
+            at <strong>{item.ceremonyLocation || window.__mahimaPrintTemplate?.address || "the church"}</strong>.
           </p>
 
           <div style={styles.certGrid}>

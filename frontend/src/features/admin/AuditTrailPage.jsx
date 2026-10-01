@@ -295,15 +295,19 @@ export default function AuditTrailPage() {
 
   return (
     <div className="min-h-full bg-slate-50 text-slate-900">
-      <div className="border-b border-slate-200 bg-white px-4 sm:px-6 py-4">
+      <header
+        id="mahima-audit-trail-page-header"
+        className="mahima-standard-page-header px-4 sm:px-6 py-4"
+        data-mahima-explicit-header="true"
+      >
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center border border-emerald-100">
+            <div className="w-10 h-10 rounded-lg bg-white/10 text-white flex items-center justify-center border border-white/20">
               <ShieldCheck className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-xl font-semibold tracking-tight">Audit Trail</h1>
-              <p className="text-sm text-slate-500">Admin view of application actions with user names and readable records.</p>
+              <h1 className="mahima-standard-page-title text-xl font-semibold tracking-tight" data-mahima-explicit-title="true">Audit Trail</h1>
+              <p className="mahima-standard-page-subtitle text-sm">Admin view of application actions with user names and readable records.</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -326,7 +330,7 @@ export default function AuditTrailPage() {
             </button>
           </div>
         </div>
-      </div>
+      </header>
 
       <div className="px-4 sm:px-6 py-4 space-y-4">
         <div className="border border-slate-200 bg-white rounded-lg p-3">

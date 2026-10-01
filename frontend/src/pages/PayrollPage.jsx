@@ -30,7 +30,7 @@ import {
   TrendingUp, TrendingDown, ArrowRight, Info,
   RefreshCw, Calculator, Users as UsersIcon, FileDown,
   Sparkles, Wallet, MinusCircle, PlusCircle, BadgeCheck,
-  Save, ChevronRight, Building2, ClipboardList,
+  Save, ChevronRight, Building2, ClipboardList, Pencil,
 } from "lucide-react";
 import api from "../api";
 
@@ -47,7 +47,7 @@ const INITIAL_SUMMARY = {
 };
 const INITIAL_SETTINGS = {
   userId: "", hourlyRate: 0, monthlyFixedAmount: 0,
-  allowances: 0, deductions: 0, isActive: true,
+  allowances: 0, deductions: 0, weeklyOffDay: 0, isActive: true,
 };
 
 const RUPEE = String.fromCharCode(0x20b9);
@@ -162,13 +162,14 @@ const downloadBlob = (blob, filename) => {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  window.URL.revokeObjectURL(url);
+  // Keep the object URL alive until the browser has consumed the binary stream.
+  window.setTimeout(() => window.URL.revokeObjectURL(url), 30000);
 };
 
 const ensurePdfBlob = async (data) => {
   const blob = data instanceof Blob ? data : new Blob([data], { type: "application/pdf" });
   const header = await blob.slice(0, 5).text();
-  if (header === "%PDF-") return blob;
+  if (header === "%PDF-" && blob.size > 500) return blob;
 
   const text = await blob.text().catch(() => "");
   throw new Error(text?.trim() || "Server did not return a valid PDF.");
@@ -280,6 +281,7 @@ export default function PayrollPage() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [downloadingHistoryId, setDownloadingHistoryId] = useState(null);
   const [deletingRunId, setDeletingRunId] = useState(null);
+  const [editingRun, setEditingRun] = useState(null);
   const [currentRunId, setCurrentRunId] = useState(null);
 
   const [confirm, setConfirm] = useState(null);
@@ -407,6 +409,7 @@ export default function PayrollPage() {
                 monthlyFixedAmount: safeNum(sFound.monthlyFixedAmount),
                 allowances: safeNum(sFound.allowances),
                 deductions: safeNum(sFound.deductions),
+                weeklyOffDay: safeNum(sFound.weeklyOffDay),
                 isActive: sFound.isActive !== false,
               }
             : { ...INITIAL_SETTINGS, userId: selectedUserId });
@@ -459,17 +462,24 @@ export default function PayrollPage() {
 
     const data = payrollRes?.data || {};
     const attendanceList = arrayFrom(attendanceRes?.data);
-    const presentDays = attendanceList.filter((r) => {
-      const s = (r.status ?? r.Status ?? "").toString().trim().toLowerCase();
-      return s === "present" || s === "p";
-    }).length;
-    const totalHours = presentDays; // Days, named hours for backend compat
+    // Pay is driven by days actually marked Present/P -- matches V4.0's real payroll
+    // behavior. This is computed client-side from the same attendance fetch, never
+    // from the backend's totalHours/Timesheets, so it can't silently drift back to
+    // an hours-based figure.
+    const presentDays = attendanceList.filter((r) => ["present", "p"].includes((r.status ?? r.Status ?? "").toString().trim().toLowerCase())).length;
+    const totalHours = presentDays;
 
     const s = overrideSettings || (allSettings.find(x => x.userId === userId)) || {};
     const hourlyRate  = safeNum(s.hourlyRate)         || safeNum(data.hourlyRate ?? data.HourlyRate);
     const fixedAmount = safeNum(data.fixedAmount ?? data.monthlyFixedAmount) || safeNum(s.monthlyFixedAmount);
     const allowances  = safeNum(data.allowances  ?? data.Allowances) || safeNum(s.allowances);
-    const fines       = safeNum(s.deductions);
+    const configuredDeductions = safeNum(s.deductions);
+    const payLossAmount = safeNum(data.payLossAmount ?? data.PayLossAmount);
+    // Backend deductions = fines + payrollAdvance (no leave-loss -- V4.0 never had
+    // that concept). Back out its own advance figure to isolate fines alone, since
+    // the advance is recomputed fresh below from this page's own expense fetch.
+    const backendAdvance = safeNum(data.payrollAdvance ?? data.PayrollAdvance);
+    const fines       = Math.max(configuredDeductions, safeNum(data.deductions ?? data.Deductions) - backendAdvance);
 
     /* Payroll advances from expenses */
     const expensesList = arrayFrom(expensesRes?.data);
@@ -490,6 +500,8 @@ export default function PayrollPage() {
     /* CORRECT formula */
     const hourlyAmount   = totalHours * hourlyRate;
     const grossAmount    = fixedAmount + hourlyAmount + allowances;
+    // Leave-loss is tracked (below, for display) but not deducted -- V4.0 never
+    // subtracted it from Net; Deductions = Fines + Payroll advances only.
     const totalDeductions = Math.max(0, fines + payrollAdvance);
     const netAmount      = Math.max(0, grossAmount - totalDeductions);
     const previousArrears = safeNum(data.previousArrears ?? data.PreviousArrears);
@@ -500,6 +512,11 @@ export default function PayrollPage() {
       userId, displayName, from: data.from || fromDate, to: data.to || toDate,
       totalHours, hourlyRate, fixedAmount, hourlyAmount, allowances,
       deductions: totalDeductions, grossAmount, netAmount, payrollAdvance, fines,
+      leaveDays: safeNum(data.leaveDays ?? data.LeaveDays),
+      paidLeaveDays: safeNum(data.paidLeaveDays ?? data.PaidLeaveDays),
+      payLossDays: safeNum(data.payLossDays ?? data.PayLossDays),
+      payLossAmount, workingDays: safeNum(data.workingDays ?? data.WorkingDays),
+      weeklyOffDay: safeNum(data.weeklyOffDay ?? data.WeeklyOffDay),
       previousArrears, payableAmount, paidAmount: 0,
         balanceAmount: payableAmount, paymentStatus: paymentStatus(0, payableAmount, payableAmount),
         calculated: true,
@@ -650,6 +667,17 @@ export default function PayrollPage() {
     });
   };
 
+  /* ------------ edit historical run ------------------------------- */
+  const handleUpdateRun = async (values) => {
+    const runId = values.id || values.Id;
+    const res = await api.put(`/payroll/runs/${runId}`, values);
+    await reloadHistory();
+    await reloadGlobalRuns();
+    if (currentRunId === runId) applySavedRun(res.data);
+    toast.success("Payroll record updated.");
+    setEditingRun(null);
+  };
+
   /* ------------ settings save ----------------------------------- */
   const handleSaveSettings = async () => {
     if (!settings.userId) { toast.error("Select a staff member first."); return; }
@@ -664,6 +692,7 @@ export default function PayrollPage() {
         monthlyFixedAmount: safeNum(settings.monthlyFixedAmount),
         allowances: safeNum(settings.allowances),
         deductions: safeNum(settings.deductions),
+        weeklyOffDay: safeNum(settings.weeklyOffDay),
         isActive: !!settings.isActive,
       });
       // refresh the cached settings list
@@ -768,6 +797,14 @@ export default function PayrollPage() {
     <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-indigo-50/40">
       <ToastStack toasts={toast.toasts} onDismiss={toast.dismiss} />
       <ConfirmModal open={!!confirm} {...(confirm || {})} onCancel={() => setConfirm(null)} />
+      {editingRun && (
+        <EditPayrollRunModal
+          run={editingRun}
+          onClose={() => setEditingRun(null)}
+          onSave={handleUpdateRun}
+          toast={toast}
+        />
+      )}
 
       <div className="max-w-7xl mx-auto px-3 sm:px-5 py-6 space-y-5 pb-20">
         {/* ============ HERO ============ */}
@@ -968,6 +1005,7 @@ export default function PayrollPage() {
                   currentRunId={currentRunId}
                   onDownload={handleDownloadHistorySlip}
                   onDelete={handleDeleteRun}
+                  onEdit={setEditingRun}
                   scope={selectedUserId ? "user" : "global"}
                 />
               )}
@@ -1289,6 +1327,18 @@ function SetupTab({ staff, settings, setSettings, savingSettings, onSave, previe
           <p className="mt-1 text-[11px] text-slate-500">Payroll advances from Costs are added automatically.</p>
         </div>
 
+        <div>
+          <Label>Weekly day off</Label>
+          <select value={settings.weeklyOffDay ?? 0}
+            onChange={(e) => update("weeklyOffDay", Number(e.target.value))}
+            className="input bg-white">
+            {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((day, index) => (
+              <option key={day} value={index}>{day}</option>
+            ))}
+          </select>
+          <p className="mt-1 text-[11px] text-slate-500">Excluded from working days and leave/pay-loss calculations.</p>
+        </div>
+
         <div className="sm:col-span-2 flex items-center gap-2 px-1">
           <input id="isActive" type="checkbox"
             checked={!!settings.isActive}
@@ -1341,7 +1391,7 @@ function PreviewBox({ label, value, accent, big }) {
   );
 }
 
-function HistoryTab({ history, loadingHistory, downloadingHistoryId, deletingRunId, currentRunId, onDownload, onDelete, scope }) {
+function HistoryTab({ history, loadingHistory, downloadingHistoryId, deletingRunId, currentRunId, onDownload, onDelete, onEdit, scope }) {
   const rows = (history || []).slice().sort((a, b) => {
     return dayjs(b.from || b.From).unix() - dayjs(a.from || a.From).unix();
   });
@@ -1435,6 +1485,10 @@ function HistoryTab({ history, loadingHistory, downloadingHistoryId, deletingRun
                           className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-50" title="Download slip">
                           {downloadingHistoryId === id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                         </button>
+                        <button onClick={() => onEdit(r)}
+                          className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-indigo-600 hover:bg-indigo-50" title="Edit record">
+                          <Pencil className="w-4 h-4" />
+                        </button>
                         <button onClick={() => onDelete(r)} disabled={deletingRunId === id}
                           className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-rose-500 hover:bg-rose-50 disabled:opacity-50" title="Delete">
                           {deletingRunId === id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
@@ -1458,6 +1512,86 @@ function Th({ children, num, center }) {
       {children}
     </th>
   );
+}
+
+/* ============================================================================
+ *  Edit payroll run modal -- full edit of a saved historical record (period,
+ *  days/rate/fixed/allowances/deductions/arrears/paid amount), not just the
+ *  paid-amount-only patch. Ported from V4.0, which had this but V4.1 never did.
+ * ========================================================================= */
+function EditPayrollRunModal({ run, onClose, onSave, toast }) {
+  const field = (name, fallback = 0) => readField(run, name, fallback);
+  const [form, setForm] = useState({
+    id: run.id || run.Id,
+    userId: field("userId", ""),
+    displayName: field("displayName", ""),
+    from: dayjs(field("from")).format("YYYY-MM-DD"),
+    to: dayjs(field("to")).format("YYYY-MM-DD"),
+    totalHours: safeNum(field("totalHours")),
+    hourlyRate: safeNum(field("hourlyRate")),
+    fixedAmount: safeNum(field("fixedAmount")),
+    allowances: safeNum(field("allowances")),
+    deductions: safeNum(field("deductions")),
+    previousArrears: safeNum(field("previousArrears")),
+    paidAmount: safeNum(field("paidAmount")),
+    paymentNotes: field("paymentNotes", "") || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (name, value) => setForm((prev) => ({ ...prev, [name]: value }));
+  const numbers = ["totalHours", "hourlyRate", "fixedAmount", "allowances", "deductions", "previousArrears", "paidAmount"];
+  const computed = useMemo(() => {
+    const gross = safeNum(form.fixedAmount) + safeNum(form.totalHours) * safeNum(form.hourlyRate) + safeNum(form.allowances);
+    const net = Math.max(0, gross - safeNum(form.deductions));
+    const payable = net + safeNum(form.previousArrears);
+    const paid = Math.min(safeNum(form.paidAmount), payable);
+    return { gross, net, payable, paid, balance: Math.max(0, payable - paid) };
+  }, [form]);
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!form.from || !form.to || dayjs(form.from).isAfter(dayjs(form.to))) { toast.error("Enter a valid payroll period."); return; }
+    if (numbers.some((name) => safeNum(form[name], -1) < 0)) { toast.error("Amounts cannot be negative."); return; }
+    setSaving(true);
+    try { await onSave({ ...form, ...computed }); }
+    catch (err) { toast.error(errMsg(err, "Failed to update payroll record.")); }
+    finally { setSaving(false); }
+  };
+  const inputs = [
+    ["totalHours", "Days / units"], ["hourlyRate", "Daily rate"], ["fixedAmount", "Fixed amount"],
+    ["allowances", "Allowances"], ["deductions", "Deductions"], ["previousArrears", "Previous arrears"], ["paidAmount", "Paid amount"],
+  ];
+  return (
+    <div className="fixed inset-0 z-[200] bg-slate-900/45 backdrop-blur-sm flex items-end sm:items-center justify-center p-3">
+      <form onSubmit={submit} className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+          <Pencil className="w-5 h-5 text-indigo-600" />
+          <div><h3 className="font-semibold text-slate-900">Edit payroll record</h3><p className="text-xs text-slate-500">{form.displayName || form.userId}</p></div>
+          <button type="button" onClick={onClose} className="ml-auto w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="p-5 max-h-[70vh] overflow-y-auto space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <EditField label="From" type="date" value={form.from} onChange={(v) => set("from", v)} />
+            <EditField label="To" type="date" value={form.to} onChange={(v) => set("to", v)} />
+            {inputs.map(([name, label]) => <EditField key={name} label={label} type="number" value={form[name]} onChange={(v) => set(name, v)} />)}
+          </div>
+          <label className="block text-xs font-semibold text-slate-600">Payment notes<textarea value={form.paymentNotes} onChange={(e) => set("paymentNotes", e.target.value)} rows={3} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal focus:outline-none focus:ring-2 focus:ring-indigo-200" /></label>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <PreviewBox label="Gross" value={formatINR(computed.gross)} accent="slate" />
+            <PreviewBox label="Net" value={formatINR(computed.net)} accent="emerald" />
+            <PreviewBox label="Payable" value={formatINR(computed.payable)} accent="indigo" />
+            <PreviewBox label="Balance" value={formatINR(computed.balance)} accent="rose" />
+          </div>
+        </div>
+        <div className="px-5 py-4 border-t border-slate-100 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="px-4 py-2 rounded-xl text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
+          <button disabled={saving} className="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-2">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save changes</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function EditField({ label, type, value, onChange }) {
+  return <label className="block text-xs font-semibold text-slate-600">{label}<input type={type} min={type === "number" ? 0 : undefined} step={type === "number" ? "0.01" : undefined} value={value} onChange={(e) => onChange(e.target.value)} required className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-200" /></label>;
 }
 
 /* ============================================================================
@@ -1520,7 +1654,7 @@ function BulkRunModal({ onClose, staff, allSettings, fromDate, toDate, calculate
   };
 
   return (
-    <div className="fixed inset-0 z-[190] bg-slate-900/45 backdrop-blur-sm flex items-end sm:items-center justify-center p-3" onClick={onClose}>
+    <div className="fixed inset-0 z-[190] bg-slate-900/45 backdrop-blur-sm flex items-end sm:items-center justify-center p-3">
       <div className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
           <Sparkles className="w-5 h-5 text-violet-500" />

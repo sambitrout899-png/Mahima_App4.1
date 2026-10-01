@@ -1,20 +1,14 @@
-// Languages API client - talks to /api/languages and /api/admin/languages.
-// Used by:
-//   - i18n/LanguageContext
-//   - features/admin/AdminLanguages
 import api from "../api";
 
 const ROOT = "/api/languages";
 const ADMIN = "/api/admin/languages";
 
-/** Public - enabled languages for the picker. */
 export async function listEnabledLanguages() {
   const result = await api.get(ROOT);
   const data = result?.data ?? result;
   return Array.isArray(data) ? data : [];
 }
 
-/** Admin - all languages incl. disabled. */
 export async function listAllLanguages() {
   const result = await api.get(ADMIN);
   const data = result?.data ?? result;
@@ -37,6 +31,16 @@ export async function deleteLanguage(code) {
 
 export async function reorderLanguages(items) {
   await api.put(`${ADMIN}/reorder`, items);
+}
+
+export async function getMyPreferredLanguage() {
+  const result = await api.get("/api/users/me/language");
+  return (result?.data ?? result)?.language || "";
+}
+
+export async function updateMyPreferredLanguage(language) {
+  const result = await api.put("/api/users/me/language", { language });
+  return (result?.data ?? result)?.language || language;
 }
 
 export const ISO_LANGUAGE_DIRECTORY = [

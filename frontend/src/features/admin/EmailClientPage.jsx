@@ -299,15 +299,19 @@ export default function EmailClientPage() {
   return (
     <div className="min-h-full bg-slate-100 px-3 py-4 sm:px-5 lg:px-6">
       <div className="mx-auto max-w-[1600px] space-y-4">
-        <header className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <header
+          id="mahima-email-client-page-header"
+          className="mahima-standard-page-header rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+          data-mahima-explicit-header="true"
+        >
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div>
               <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
                 <ShieldCheck className="h-4 w-4" />
                 Admin Outlook Desk
               </div>
-              <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">Email Client</h1>
-              <p className="mt-1 text-sm text-slate-500">Mailbox, reading pane, SMTP compose, folders, search, and connection controls.</p>
+              <h1 className="mahima-standard-page-title mt-3 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl" data-mahima-explicit-title="true">Email Client</h1>
+              <p className="mahima-standard-page-subtitle mt-1 text-sm text-slate-500">Mailbox, reading pane, SMTP compose, folders, search, and connection controls.</p>
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -623,6 +627,22 @@ function ComposePanel({ compose, setCompose, sending, showCcBcc, setShowCcBcc, o
 }
 
 function ReadingPane({ mail, loading, onReply, onCompose, onDownloadAttachment, downloadingAttachment }) {
+  const [bodyView, setBodyView] = useState("html");
+  const [showRemoteImages, setShowRemoteImages] = useState(false);
+  const hasHtmlBody = Boolean(mail?.htmlBody?.trim());
+  const hasTextBody = Boolean(mail?.textBody?.trim());
+  const htmlHasReadableText = useMemo(() => hasReadableEmailText(mail?.htmlBody), [mail?.htmlBody]);
+  const containsRemoteImages = useMemo(() => hasRemoteEmailImages(mail?.htmlBody), [mail?.htmlBody]);
+  const safeHtmlDocument = useMemo(
+    () => buildSafeEmailDocument(mail?.htmlBody, showRemoteImages),
+    [mail?.htmlBody, showRemoteImages]
+  );
+
+  useEffect(() => {
+    setShowRemoteImages(false);
+    setBodyView(hasHtmlBody && (htmlHasReadableText || !hasTextBody) ? "html" : "text");
+  }, [mail?.uid, hasHtmlBody, hasTextBody, htmlHasReadableText]);
+
   if (loading) {
     return (
       <section className="flex min-h-[620px] items-center justify-center gap-2 bg-white text-sm font-semibold text-slate-500">
@@ -711,16 +731,49 @@ function ReadingPane({ mail, loading, onReply, onCompose, onDownloadAttachment, 
         </div>
       )}
 
-      <div className="h-[510px] overflow-y-auto p-5">
-        {mail.htmlBody ? (
+      <div className="p-5">
+        {(hasHtmlBody || hasTextBody) && (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+            <p className="text-xs font-semibold text-slate-500">
+              {bodyView === "text"
+                ? "Plain-text view for maximum readability."
+                : showRemoteImages
+                  ? "Remote images are visible for this message."
+                  : "Remote images are hidden to protect your privacy."}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              {hasHtmlBody && hasTextBody && (
+                <button
+                  type="button"
+                  onClick={() => setBodyView((current) => (current === "html" ? "text" : "html"))}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-sm transition hover:border-emerald-200 hover:text-emerald-700"
+                >
+                  {bodyView === "html" ? "View plain text" : "View original email"}
+                </button>
+              )}
+              {bodyView === "html" && containsRemoteImages && (
+                <button
+                  type="button"
+                  onClick={() => setShowRemoteImages((current) => !current)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-sm transition hover:border-emerald-200 hover:text-emerald-700"
+                >
+                  {showRemoteImages ? "Hide remote images" : "Show remote images"}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {bodyView === "html" && hasHtmlBody ? (
           <iframe
             title="Email body"
-            sandbox=""
-            srcDoc={mail.htmlBody}
-            className="h-full w-full rounded-xl border border-slate-200 bg-white"
+            sandbox="allow-popups allow-popups-to-escape-sandbox"
+            referrerPolicy="no-referrer"
+            srcDoc={safeHtmlDocument}
+            className="h-[460px] w-full rounded-xl border border-slate-200 bg-white"
           />
         ) : (
-          <div className="whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700">
+          <div className="min-h-[240px] whitespace-pre-wrap rounded-xl border border-slate-200 bg-white p-5 text-sm leading-7 text-slate-700">
             {mail.textBody || "This message does not contain a readable body."}
           </div>
         )}
@@ -860,4 +913,122 @@ function formatBytes(value) {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function hasReadableEmailText(html) {
+  const source = String(html || "").trim();
+  if (!source) return false;
+
+  if (typeof DOMParser === "undefined") {
+    return source
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;|&#160;/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim().length >= 24;
+  }
+
+  const document = new DOMParser().parseFromString(source, "text/html");
+  document.querySelectorAll("script, style, noscript, template, svg").forEach((node) => node.remove());
+  const readableText = String(document.body?.textContent || "").replace(/\s+/g, " ").trim();
+  return readableText.length >= 24;
+}
+
+function hasRemoteEmailImages(html) {
+  const source = String(html || "");
+  return /(?:src|background)\s*=\s*["']?\s*https?:\/\//i.test(source) || /url\(\s*["']?https?:\/\//i.test(source);
+}
+
+function buildSafeEmailDocument(html, allowRemoteImages) {
+  const source = String(html || "").trim();
+  if (!source) return "";
+
+  if (typeof DOMParser === "undefined") {
+    return `<!doctype html><html><body><pre>${escapeEmailHtml(source)}</pre></body></html>`;
+  }
+
+  const document = new DOMParser().parseFromString(source, "text/html");
+  document.querySelectorAll("script, iframe, frame, frameset, object, embed, form, input, button, textarea, select, base, meta[http-equiv], link").forEach((node) => node.remove());
+
+  document.querySelectorAll("*").forEach((element) => {
+    Array.from(element.attributes || []).forEach((attribute) => {
+      const name = attribute.name.toLowerCase();
+      const value = attribute.value.trim();
+      if (name.startsWith("on") || name === "formaction" || name === "srcdoc") {
+        element.removeAttribute(attribute.name);
+        return;
+      }
+      if ((name === "href" || name === "action") && /^(?:javascript|data|vbscript):/i.test(value)) {
+        element.removeAttribute(attribute.name);
+        return;
+      }
+      if (name === "style" && !allowRemoteImages && /url\s*\(/i.test(value)) {
+        element.setAttribute("style", value.replace(/url\s*\([^)]*\)/gi, "none"));
+      }
+    });
+  });
+
+  document.querySelectorAll("a[href]").forEach((link) => {
+    link.setAttribute("target", "_blank");
+    link.setAttribute("rel", "noopener noreferrer");
+  });
+
+  document.querySelectorAll("img").forEach((image) => {
+    const sourceUrl = String(image.getAttribute("src") || "").trim();
+    const isEmbeddedImage = /^data:image\//i.test(sourceUrl);
+    const isRemoteImage = /^https?:\/\//i.test(sourceUrl) || sourceUrl.startsWith("//");
+
+    image.removeAttribute("srcset");
+    image.removeAttribute("sizes");
+    image.removeAttribute("width");
+    image.removeAttribute("height");
+
+    if (isEmbeddedImage || (isRemoteImage && allowRemoteImages)) return;
+
+    const placeholder = document.createElement("div");
+    placeholder.className = "email-image-placeholder";
+    const altText = String(image.getAttribute("alt") || "").trim();
+    placeholder.textContent = /^cid:/i.test(sourceUrl)
+      ? `${altText ? `${altText} — ` : ""}Inline image unavailable`
+      : `${altText ? `${altText} — ` : ""}Remote image hidden`;
+    image.replaceWith(placeholder);
+  });
+
+  if (!allowRemoteImages) {
+    document.querySelectorAll("style").forEach((style) => {
+      style.textContent = String(style.textContent || "").replace(/url\s*\([^)]*\)/gi, "none");
+    });
+  }
+
+  const safeBody = document.body?.innerHTML || "";
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root { color-scheme: light; }
+      * { box-sizing: border-box; }
+      html, body { min-height: 100%; background: #ffffff !important; }
+      body { margin: 0 !important; padding: 20px !important; color: #334155 !important; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important; font-size: 15px; line-height: 1.65; overflow-wrap: anywhere; }
+      img { display: block; max-width: 100% !important; height: auto !important; object-fit: contain; }
+      table { max-width: 100% !important; }
+      pre { max-width: 100%; overflow: auto; white-space: pre-wrap; }
+      blockquote { margin-left: 0; border-left: 3px solid #cbd5e1; padding-left: 14px; color: #64748b; }
+      a { color: #047857; text-decoration: underline; }
+      .email-image-placeholder { display: inline-flex !important; width: auto !important; min-width: 0 !important; height: auto !important; min-height: 0 !important; max-height: 44px !important; margin: 8px 0 !important; padding: 8px 12px !important; align-items: center; border: 1px dashed #cbd5e1; border-radius: 8px; background: #f8fafc !important; color: #64748b !important; font-size: 12px !important; font-weight: 700; line-height: 1.25 !important; }
+    </style>
+  </head>
+  <body>${safeBody}</body>
+</html>`;
+}
+
+function escapeEmailHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }

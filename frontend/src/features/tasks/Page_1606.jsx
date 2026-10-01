@@ -266,7 +266,7 @@ export default function TasksPage() {
       const normalized = Array.isArray(data)
         ? data.map((t) => {
             // assignees can be: an array of {id,type}, separate users[]+teams[],
-            // or just a legacy assigneeId â€” handle all three
+            // or just a legacy assigneeId — handle all three
             let assignees = [];
             const raw = t.assignees ?? t.Assignees;
             if (Array.isArray(raw)) {
@@ -362,7 +362,7 @@ export default function TasksPage() {
     }
     setSaving(true);
     const assignees = form.assignees ?? [];
-    // Legacy column is bigint â€” only safe to populate from numeric IDs.
+    // Legacy column is bigint — only safe to populate from numeric IDs.
     // Once the TaskAssignees join table is live, this can stay null and the
     // join table becomes the source of truth.
     const numericId = (() => {
@@ -601,7 +601,7 @@ export default function TasksPage() {
           <div className="tp-search">
             <Search size={16} />
             <input
-              placeholder="Search tasksâ€¦"
+              placeholder="Search tasks…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -1066,8 +1066,8 @@ function Avatar({ entity, size = 26, ring = true }) {
     boxShadow: ring ? "0 0 0 2px #fff" : "none",
   };
   const title = isTeam
-    ? `${entity.name}${entity.memberCount ? ` (${entity.memberCount})` : ""} Â· Team`
-    : `${entity.name}${entity.email ? ` Â· ${entity.email}` : ""}`;
+    ? `${entity.name}${entity.memberCount ? ` (${entity.memberCount})` : ""} · Team`
+    : `${entity.name}${entity.email ? ` · ${entity.email}` : ""}`;
 
   return (
     <span className={`tp-avatar ${isTeam ? "is-team" : ""}`} style={style} title={title}>
@@ -1188,7 +1188,7 @@ function AssigneePicker({ users, teams, selected, onChange, loadTeamMembers }) {
         <div className="tp-picker-chips">
           {selected.length === 0 ? (
             <span className="tp-picker-placeholder">
-              <Users size={14} /> Assign people or teamsâ€¦
+              <Users size={14} /> Assign people or teams...
             </span>
           ) : (
             selected.map((a) => (
@@ -1224,7 +1224,7 @@ function AssigneePicker({ users, teams, selected, onChange, loadTeamMembers }) {
             <Search size={14} />
             <input
               autoFocus
-              placeholder="Search people or teamsâ€¦"
+              placeholder="Search people or teams..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -1275,7 +1275,7 @@ function AssigneePicker({ users, teams, selected, onChange, loadTeamMembers }) {
                             <div className="tp-team-members">
                               {loading ? (
                                 <div className="tp-picker-empty small">
-                                  <Loader2 size={13} className="spin" /> Loading membersâ€¦
+                                  <Loader2 size={13} className="spin" /> Loading members…
                                 </div>
                               ) : memberIds.length === 0 ? (
                                 <div className="tp-picker-empty small">No members in this team</div>
@@ -1292,7 +1292,7 @@ function AssigneePicker({ users, teams, selected, onChange, loadTeamMembers }) {
                                     const u = userIndex.get(String(uid));
                                     if (!u) return (
                                       <div key={`m-${uid}`} className="tp-picker-empty small">
-                                        Unknown user Â· {String(uid).slice(0, 8)}â€¦
+                                        Unknown user · {String(uid).slice(0, 8)}…
                                       </div>
                                     );
                                     return (
@@ -1358,7 +1358,7 @@ function PickerRow({ entity, selected, onToggle, compact = false }) {
         <div className="tp-picker-row-name">{entity.name}</div>
         <div className="tp-picker-row-sub">
           {entity.type === "team"
-            ? `Team${entity.memberCount ? ` Â· ${entity.memberCount} members` : ""}`
+            ? `Team${entity.memberCount ? ` · ${entity.memberCount} members` : ""}`
             : entity.email || "User"}
         </div>
       </div>
@@ -1484,7 +1484,7 @@ function TaskModal({ form, setForm, saving, users, teams, loadTeamMembers, tasks
         <footer className="tp-modal-foot">
           <button type="button" className="tp-btn ghost" onClick={onClose}>Cancel</button>
           <button type="submit" className="tp-btn primary" disabled={saving}>
-            {saving ? <><Loader2 size={15} className="spin" /> Savingâ€¦</> : (form.id ? "Save changes" : "Create task")}
+            {saving ? <><Loader2 size={15} className="spin" /> Saving…</> : (form.id ? "Save changes" : "Create task")}
           </button>
         </footer>
       </form>
@@ -2317,7 +2317,7 @@ function Styles() {
       }
       .tp-picker-caret.open { transform: rotate(180deg); }
 
-      /* Inline expanding panel â€” no overflow surprises inside scrollable parents */
+      /* Inline expanding panel — no overflow surprises inside scrollable parents */
       .tp-picker-panel {
         border-top: 1px solid var(--border);
         display: flex;

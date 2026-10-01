@@ -1606,6 +1606,11 @@ namespace Mahima.Api.v3.clean.Migrations
                         .HasColumnType("text")
                         .HasColumnName("phone");
 
+                    b.Property<string>("PreferredLanguage")
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)")
+                        .HasColumnName("preferred_language");
+
                     b.Property<string>("Role")
                         .IsRequired()
                         .HasColumnType("text")

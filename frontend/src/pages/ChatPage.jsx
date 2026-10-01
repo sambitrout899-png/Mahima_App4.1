@@ -26,6 +26,7 @@ import useChatCall from "../hooks/useChatCall";
 import { useChatConnection } from "../hooks/useChatConnection";
 import { getToken } from "../utils/auth";
 import { API_BASE } from "../api";
+import { chatBrandName, currentMahimaUser } from "../utils/chatBranding";
 
 function getMeId() {
   try {
@@ -120,6 +121,7 @@ function sortChatsByLatest(list) {
 }
 
 export default function ChatPage() {
+  const chatBrand = useMemo(() => chatBrandName(currentMahimaUser()), []);
   const [chats, setChats] = useState([]);
   const [loadingChats, setLoadingChats] = useState(false);
   const [selectedChat, setSelectedChat] = useState(null);
@@ -520,7 +522,7 @@ export default function ChatPage() {
           <Cross className="w-4 h-4" />
         </span>
         <div className="leading-tight min-w-0">
-          <div className="text-base sm:text-lg font-black tracking-tight">Jai Masih</div>
+          <div className="text-base sm:text-lg font-black tracking-tight">{chatBrand}</div>
           <div className="text-[10px] sm:text-xs text-emerald-100/80 truncate">
             {isConnected ? "Connected" : "Reconnecting..."}
           </div>

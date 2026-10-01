@@ -15,6 +15,7 @@ namespace Mahima.Api.v3.clean.Models
         public string? DisplayName { get; set; }
         public string? ProfilePhotoUrl { get; set; }
         public string Role { get; set; } = "member";
+        public string? PreferredLanguage { get; set; }
         public DateTime JoinDate { get; set; } = DateTime.UtcNow;
         public DateTime? LastLogin { get; set; }
 
@@ -68,6 +69,13 @@ namespace Mahima.Api.v3.clean.Models
         // IAppointmentLetterService / UsersController's generate+download endpoints.
         public string? AppointmentLetterUrl { get; set; }
         public DateTime? AppointmentLetterGeneratedAtUtc { get; set; }
+
+        // -------- Multi-factor authentication (TOTP) --------
+        public bool MfaEnabled { get; set; } = false;
+        public string? MfaSecret { get; set; }
+        public string? MfaPendingSecret { get; set; }
+        public string? MfaRecoveryCodes { get; set; }
+        public DateTime? MfaEnabledAtUtc { get; set; }
 
         public Tenant? Tenant { get; set; }
     }

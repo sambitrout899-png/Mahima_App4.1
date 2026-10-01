@@ -79,10 +79,10 @@ function resolveApiBase() {
     const configured =
       (typeof window !== "undefined" && window.__API_BASE__) ||
       import.meta.env.VITE_API_BASE_URL ||
-      "https://mahimaministries.in/api";
+      "https://beta.mahimaministries.in/api";
     return String(configured).replace(/\/+$/, "");
   } catch {
-    return "https://mahimaministries.in/api";
+    return "https://beta.mahimaministries.in/api";
   }
 }
 

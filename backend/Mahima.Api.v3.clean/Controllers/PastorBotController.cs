@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.Data;
 using System.IO;
 using System.Linq;
+using System.IO.Compression;
+using System.Text;
+using System.Xml.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Mahima.Api.v3.clean.Data;
@@ -17,6 +20,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using iText.Kernel.Pdf;
+using iText.Kernel.Pdf.Canvas.Parser;
 
 namespace Mahima.Api.v3.clean.Controllers
 {
@@ -81,7 +86,7 @@ namespace Mahima.Api.v3.clean.Controllers
         }
 
         [HttpPost("readme")]
-        [RequestSizeLimit(7_000_000)]
+        [RequestSizeLimit(10_000_000)]
         public async Task<IActionResult> ReadMe([FromBody] PastorBotReadMeDto dto)
         {
             var userId = User.GetUserIdGuid();
@@ -91,17 +96,31 @@ namespace Mahima.Api.v3.clean.Controllers
             if (dto == null || !dto.ConsentAccepted)
                 return BadRequest("Consent is required before using ReadMe.");
 
-            if (string.IsNullOrWhiteSpace(dto.ImageDataUrl))
-                return BadRequest("A camera image is required.");
+            var suppliedDataUrl = string.IsNullOrWhiteSpace(dto.ArtifactDataUrl) ? dto.ImageDataUrl : dto.ArtifactDataUrl;
+            if (string.IsNullOrWhiteSpace(suppliedDataUrl))
+                return BadRequest("Capture a camera frame or upload an artifact first.");
 
-            var image = dto.ImageDataUrl.Trim();
+            var image = suppliedDataUrl.Trim();
             var supported =
                 image.StartsWith("data:image/jpeg;base64,", StringComparison.OrdinalIgnoreCase) ||
                 image.StartsWith("data:image/png;base64,", StringComparison.OrdinalIgnoreCase) ||
                 image.StartsWith("data:image/webp;base64,", StringComparison.OrdinalIgnoreCase);
 
             if (!supported)
-                return BadRequest("ReadMe supports JPEG, PNG, or WEBP camera images.");
+            {
+                try
+                {
+                    var extracted = ExtractArtifactText(image, dto.ArtifactName);
+                    if (string.IsNullOrWhiteSpace(extracted)) return BadRequest("No readable text was found in this artifact.");
+                    return Ok(await _pastorBot.ReadArtifactAsync(userId, dto.ArtifactName ?? "artifact", extracted, dto.Note, dto.Language, dto.Persona, HttpContext.RequestAborted));
+                }
+                catch (InvalidDataException ex) { return BadRequest(ex.Message); }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "ReadMe could not extract artifact {ArtifactName}.", dto.ArtifactName);
+                    return BadRequest("This artifact could not be read. It may be encrypted, damaged, or use an unsupported format.");
+                }
+            }
 
             var reply = await _pastorBot.ReadMeAsync(
                 userId,
@@ -112,6 +131,44 @@ namespace Mahima.Api.v3.clean.Controllers
                 HttpContext.RequestAborted);
 
             return Ok(reply);
+        }
+
+        private static string ExtractArtifactText(string dataUrl, string? fileName)
+        {
+            var comma = dataUrl.IndexOf(',');
+            if (comma < 0 || !dataUrl[..comma].Contains(";base64", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("The uploaded artifact data is invalid.");
+            byte[] bytes;
+            try { bytes = Convert.FromBase64String(dataUrl[(comma + 1)..]); }
+            catch (FormatException) { throw new InvalidDataException("The uploaded artifact could not be decoded."); }
+            if (bytes.Length > 6_000_000) throw new InvalidDataException("Artifacts must be 6 MB or smaller.");
+
+            var ext = Path.GetExtension(fileName ?? string.Empty).ToLowerInvariant();
+            if (new[] { ".txt", ".md", ".csv", ".json", ".xml", ".html", ".htm", ".log" }.Contains(ext))
+                return Encoding.UTF8.GetString(bytes);
+            if (ext == ".pdf")
+            {
+                using var input = new MemoryStream(bytes);
+                using var pdf = new PdfDocument(new PdfReader(input));
+                var text = new StringBuilder();
+                for (var page = 1; page <= Math.Min(pdf.GetNumberOfPages(), 100); page++) text.AppendLine(PdfTextExtractor.GetTextFromPage(pdf.GetPage(page)));
+                return text.ToString();
+            }
+            if (new[] { ".docx", ".pptx", ".xlsx" }.Contains(ext))
+            {
+                using var input = new MemoryStream(bytes);
+                using var zip = new ZipArchive(input, ZipArchiveMode.Read);
+                var text = new StringBuilder();
+                foreach (var entry in zip.Entries.Where(e => e.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)))
+                {
+                    using var stream = entry.Open();
+                    var document = XDocument.Load(stream);
+                    foreach (var node in document.Descendants().Where(x => x.Name.LocalName is "t" or "p"))
+                        if (!string.IsNullOrWhiteSpace(node.Value)) text.AppendLine(node.Value.Trim());
+                }
+                return text.ToString();
+            }
+            throw new InvalidDataException("Supported artifacts: images, PDF, Word (.docx), PowerPoint (.pptx), Excel (.xlsx), CSV, JSON, Markdown, HTML, XML, log, and text files.");
         }
 
         [HttpPost("ensure-jai-masih")]
@@ -137,7 +194,8 @@ namespace Mahima.Api.v3.clean.Controllers
                 return BadRequest("Upload a WAV, MP3, M4A, WEBM, or OGG voice sample.");
 
             var root = _env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot");
-            var dir = Path.Combine(root, "uploads", "pastor-voice");
+            if (!Guid.TryParse(User.FindFirstValue("tenant_id"), out var storageTenantId)) return Forbid();
+            var dir = Path.Combine(root, "uploads", "pastor-voice", storageTenantId.ToString("N"));
             Directory.CreateDirectory(dir);
 
             var fileName = $"pastor_voice_sample{ext}";
@@ -150,7 +208,7 @@ namespace Mahima.Api.v3.clean.Controllers
             return Ok(new
             {
                 message = "Voice sample stored. Use it only with explicit consent and label generated audio as AI-created.",
-                url = $"/uploads/pastor-voice/{fileName}"
+                url = $"/uploads/pastor-voice/{storageTenantId:N}/{fileName}"
             });
         }
 
@@ -159,13 +217,14 @@ namespace Mahima.Api.v3.clean.Controllers
         public IActionResult GetVoiceSample()
         {
             var root = _env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot");
-            var dir = Path.Combine(root, "uploads", "pastor-voice");
+            if (!Guid.TryParse(User.FindFirstValue("tenant_id"), out var storageTenantId)) return Forbid();
+            var dir = Path.Combine(root, "uploads", "pastor-voice", storageTenantId.ToString("N"));
             if (!Directory.Exists(dir)) return NotFound();
 
             var file = Directory.GetFiles(dir, "pastor_voice_sample.*").FirstOrDefault();
             if (file == null) return NotFound();
 
-            return Ok(new { url = $"/uploads/pastor-voice/{Path.GetFileName(file)}" });
+            return Ok(new { url = $"/uploads/pastor-voice/{storageTenantId:N}/{Path.GetFileName(file)}" });
         }
 
         private async Task<bool> CanUsePastorAsync()

@@ -102,11 +102,11 @@ export default function UserLoginDashboard() {
   return (
     <section className="min-h-full bg-slate-50 px-4 py-5 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl space-y-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="mahima-standard-page-header flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between" data-mahima-explicit-header="true">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Admin Operations</p>
-            <h1 className="mt-1 text-3xl font-bold text-slate-950">Live User Dashboard</h1>
-            <p className="mt-1 text-sm text-slate-600">See who is currently connected to the Mahima app and chat service.</p>
+            <p className="mahima-standard-page-eyebrow text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Admin Operations</p>
+            <h1 className="mahima-standard-page-title mt-1 text-3xl font-bold text-slate-950" data-mahima-explicit-title="true">Live User Dashboard</h1>
+            <p className="mahima-standard-page-subtitle mt-1 text-sm text-slate-600">See who is currently connected to the Mahima app and chat service.</p>
           </div>
           <button
             type="button"

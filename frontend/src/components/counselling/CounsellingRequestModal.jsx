@@ -114,14 +114,14 @@ export default function CounsellingRequestModal({ open, onClose }) {
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-4 py-2 rounded-full border"
+                  className="px-4 py-2 rounded-full border border-emerald-700 bg-emerald-50 text-emerald-800 font-semibold"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={loading}
-                  className="px-4 py-2 rounded-full bg-gradient-to-r from-pink-500 to-orange-400 text-white disabled:opacity-60"
+                  className="px-4 py-2 rounded-full bg-gradient-to-r from-emerald-700 to-emerald-600 text-white font-semibold disabled:opacity-60"
                 >
                   {loading ? "Submitting..." : "Submit request"}
                 </button>
@@ -143,7 +143,7 @@ export default function CounsellingRequestModal({ open, onClose }) {
             </div>
             <button
               onClick={onClose}
-              className="mt-2 px-4 py-2 rounded-full bg-pink-500 text-white"
+              className="mt-2 px-4 py-2 rounded-full bg-emerald-700 text-white font-semibold"
             >
               Close
             </button>

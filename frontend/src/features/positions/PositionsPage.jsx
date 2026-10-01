@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   Crown,
   GitBranch,
+  GripVertical,
   Network,
   Pencil,
   Plus,
@@ -102,6 +103,8 @@ export default function PositionsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [draggedPositionId, setDraggedPositionId] = useState("");
+  const [dropTargetId, setDropTargetId] = useState("");
 
   async function load() {
     setLoading(true);
@@ -281,6 +284,30 @@ export default function PositionsPage() {
     }
   }
 
+  async function movePosition(positionId, parentPositionId) {
+    if (!positionId || String(positionId) === String(parentPositionId || "")) return;
+    setError("");
+    setNotice("");
+    try {
+      await api.put(`/positions/${positionId}/parent`, {
+        parentPositionId: parentPositionId ? Number(parentPositionId) : null,
+      });
+      setNotice(parentPositionId ? "Position moved under its new parent." : "Position moved to the top level.");
+      await load();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Unable to update the position hierarchy."));
+    } finally {
+      setDraggedPositionId("");
+      setDropTargetId("");
+    }
+  }
+
+  function dropPosition(event, parentPositionId = null) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (draggedPositionId) movePosition(draggedPositionId, parentPositionId);
+  }
+
   async function saveAssignment(event) {
     event.preventDefault();
     if (!assignment.userId || !assignment.positionId) return;
@@ -374,18 +401,15 @@ export default function PositionsPage() {
             <label className="grid gap-1 text-sm font-bold text-slate-700">Position name
               <input className="rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-emerald-200 focus:ring-4" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Example: Worship Lead" />
             </label>
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="grid gap-1 text-sm font-bold text-slate-700">Parent position
-                <select className="rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-emerald-200 focus:ring-4" value={form.parentPositionId} onChange={(event) => setForm({ ...form, parentPositionId: event.target.value })}>
-                  <option value="">None</option>
-                  {positionOptions.filter((position) => String(position.id) !== String(form.id)).map((position) => <option key={position.id} value={position.id}>{position.name}</option>)}
-                </select>
-              </label>
+            <div className="grid gap-4">
               <label className="grid gap-1 text-sm font-bold text-slate-700">Visibility
                 <select className="rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none ring-emerald-200 focus:ring-4" value={form.visibilityScope} onChange={(event) => setForm({ ...form, visibilityScope: event.target.value })}>
                   {scopes.map((scope) => <option key={scope.value} value={scope.value}>{scope.label}</option>)}
                 </select>
               </label>
+            </div>
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-800">
+              Parent and child relationships are managed directly in the Position Hierarchy panel by drag and drop.
             </div>
             <div className={`rounded-lg border px-3 py-2 text-xs font-semibold ${scopeTone(form.visibilityScope)}`}>
               {scopes.find((scope) => scope.value === form.visibilityScope)?.hint || "Personal visibility."}
@@ -449,12 +473,20 @@ export default function PositionsPage() {
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-sm font-black text-white">3</div>
               <div>
                 <h2 className="text-lg font-black">Position Hierarchy</h2>
-                <p className="mt-1 text-sm text-slate-500">Select any position at any level to see exactly who is attached.</p>
+                <p className="mt-1 text-sm text-slate-500">Drag a position onto another to make it a child. Double-click any position to edit its definition.</p>
               </div>
             </div>
             <GitBranch className="h-5 w-5 shrink-0 text-slate-400" />
           </div>
           <div className="max-h-[650px] overflow-auto p-3">
+            <div
+              onDragOver={(event) => { event.preventDefault(); setDropTargetId("root"); }}
+              onDragLeave={() => setDropTargetId("")}
+              onDrop={(event) => dropPosition(event, null)}
+              className={`mb-3 rounded-lg border-2 border-dashed px-4 py-3 text-center text-xs font-bold transition ${dropTargetId === "root" ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-slate-50 text-slate-500"}`}
+            >
+              Drop here to make a position top-level
+            </div>
             {loading ? <div className="p-5 text-sm text-slate-500">Loading positions...</div> : treeRows.map((position) => {
               const isSelected = String(selectedPositionId) === String(position.id);
               const assignedCount = (usersByPosition.get(String(position.id)) || []).length;
@@ -464,9 +496,18 @@ export default function PositionsPage() {
                   key={position.id}
                   type="button"
                   onClick={() => setSelectedPositionId(String(position.id))}
-                  className={`mb-2 grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border py-3 pl-2 pr-4 text-left transition hover:border-emerald-200 hover:bg-emerald-50/60 ${isSelected ? "border-emerald-300 bg-emerald-50 shadow-sm ring-1 ring-emerald-200" : "border-slate-200 bg-white"}`}
+                  onDoubleClick={() => edit(position)}
+                  draggable
+                  onDragStart={(event) => { setDraggedPositionId(String(position.id)); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", String(position.id)); }}
+                  onDragEnd={() => { setDraggedPositionId(""); setDropTargetId(""); }}
+                  onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); if (String(position.id) !== String(draggedPositionId)) setDropTargetId(String(position.id)); }}
+                  onDragLeave={() => setDropTargetId("")}
+                  onDrop={(event) => dropPosition(event, position.id)}
+                  title="Drag to change hierarchy; double-click to edit"
+                  className={`mb-2 grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border py-3 pl-2 pr-4 text-left transition hover:border-emerald-200 hover:bg-emerald-50/60 ${dropTargetId === String(position.id) ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200" : isSelected ? "border-emerald-300 bg-emerald-50 shadow-sm ring-1 ring-emerald-200" : "border-slate-200 bg-white"} ${draggedPositionId === String(position.id) ? "opacity-50" : ""}`}
                 >
                   <div className="flex min-w-0 items-center gap-3" style={{ paddingLeft: `${depth * 22}px` }}>
+                    <GripVertical className="h-5 w-5 shrink-0 cursor-grab text-slate-400" />
                     <span className={`h-10 w-1.5 shrink-0 rounded-full ${scopeAccent(position.visibilityScope)}`} />
                     <span className="flex h-8 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-[11px] font-black text-slate-500">L{depth}</span>
                     <div className="min-w-0">

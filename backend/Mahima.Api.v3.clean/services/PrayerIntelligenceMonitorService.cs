@@ -72,8 +72,8 @@ namespace Mahima.Api.v3.clean.Services
 
             await EnsureMonitorSchemaAsync(db, ct);
 
-            var managerIds = await LoadCallCenterManagerIdsAsync(db, ct);
-            if (managerIds.Count == 0)
+            var managersByTenant = await LoadCallCenterManagerIdsByTenantAsync(db, ct);
+            if (managersByTenant.Count == 0)
             {
                 _logger.LogInformation("Prayer intelligence monitor found no users assigned to Call Center Manager position.");
                 return;
@@ -94,6 +94,7 @@ namespace Mahima.Api.v3.clean.Services
                 .Select(p => new PrayerAlertCandidate
                 {
                     Id = p.Id,
+                    TenantId = p.TenantId,
                     Title = p.Title,
                     Message = p.Message,
                     CreatedBy = p.CreatedBy,
@@ -106,6 +107,9 @@ namespace Mahima.Api.v3.clean.Services
             var botUserId = await pastorBot.EnsurePastorBotUserAsync(ct);
             foreach (var prayer in duePrayers)
             {
+                if (!managersByTenant.TryGetValue(prayer.TenantId, out var managerIds) || managerIds.Count == 0)
+                    continue;
+
                 foreach (var managerId in managerIds)
                 {
                     if (await AlreadyRemindedTodayAsync(db, prayer.Id, managerId, ct)) continue;
@@ -150,26 +154,38 @@ ON public.prayer_monitor_reminders (prayerrequestid, sentatutc DESC);";
             await db.Database.ExecuteSqlRawAsync(sql, ct);
         }
 
-        private async Task<List<Guid>> LoadCallCenterManagerIdsAsync(MahimaDbContext db, CancellationToken ct)
+        private async Task<Dictionary<Guid, List<Guid>>> LoadCallCenterManagerIdsByTenantAsync(MahimaDbContext db, CancellationToken ct)
         {
             var conn = db.Database.GetDbConnection();
             if (conn.State != ConnectionState.Open) await conn.OpenAsync(ct);
             await Mahima.Api.v3.clean.Controllers.PositionsController.EnsurePositionTablesAsync((NpgsqlConnection)conn);
 
+            // Scope managers to the tenant that owns their position assignment (not the user's own
+            // tenant_id directly) so a manager only ever alerts on their own church's prayer wall.
             await using var cmd = new NpgsqlCommand(@"
-SELECT DISTINCT up.user_id
+SELECT DISTINCT p.tenant_id, up.user_id
 FROM public.user_positions up
 JOIN public.positions p ON p.id = up.position_id AND p.is_active = true
-JOIN public.users u ON u.id = up.user_id
+JOIN public.users u ON u.id = up.user_id AND u.tenant_id = p.tenant_id
 WHERE lower(regexp_replace(p.name, '[^a-z0-9]+', '', 'g')) IN (
     'callcentermanager',
     'callcentremanager'
 );", (NpgsqlConnection)conn);
 
-            var ids = new List<Guid>();
+            var byTenant = new Dictionary<Guid, List<Guid>>();
             await using var rdr = await cmd.ExecuteReaderAsync(ct);
-            while (await rdr.ReadAsync()) ids.Add(rdr.GetGuid(0));
-            return ids;
+            while (await rdr.ReadAsync())
+            {
+                var tenantId = rdr.GetGuid(0);
+                var userId = rdr.GetGuid(1);
+                if (!byTenant.TryGetValue(tenantId, out var list))
+                {
+                    list = new List<Guid>();
+                    byTenant[tenantId] = list;
+                }
+                list.Add(userId);
+            }
+            return byTenant;
         }
 
         private async Task<bool> AlreadyRemindedTodayAsync(MahimaDbContext db, long prayerRequestId, Guid managerId, CancellationToken ct)
@@ -239,6 +255,7 @@ ON CONFLICT (prayerrequestid, recipientuserid, reminderlocaldate) DO NOTHING;", 
         private sealed class PrayerAlertCandidate
         {
             public long Id { get; set; }
+            public Guid TenantId { get; set; }
             public string? Title { get; set; }
             public string? Message { get; set; }
             public string? CreatedBy { get; set; }

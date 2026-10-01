@@ -2,25 +2,63 @@ plugins {
     id 'com.android.application'
 }
 
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+
+def releaseStoreFile = System.getenv('MAHIMA_ANDROID_KEYSTORE') ?: keystoreProperties.getProperty('storeFile')
+def releaseStorePassword = System.getenv('MAHIMA_ANDROID_STORE_PASSWORD') ?: keystoreProperties.getProperty('storePassword')
+def releaseKeyAlias = System.getenv('MAHIMA_ANDROID_KEY_ALIAS') ?: keystoreProperties.getProperty('keyAlias')
+def releaseKeyPassword = System.getenv('MAHIMA_ANDROID_KEY_PASSWORD') ?: keystoreProperties.getProperty('keyPassword')
+def hasReleaseSigning = releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
+def requestedReleaseBuild = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
+
+if (requestedReleaseBuild && !hasReleaseSigning) {
+    throw new GradleException('Release signing is not configured. Create android/keystore.properties or set the MAHIMA_ANDROID_* environment variables.')
+}
+
 android {
     namespace "com.mahimaministries.app"
     compileSdk rootProject.ext.compileSdkVersion
 
     defaultConfig {
-        applicationId "com.mahimaministries.app"
+        applicationId project.hasProperty('tenantApplicationId') ? project.tenantApplicationId : "com.mahimaministries.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 4
-        versionName "1.0.3"
+        versionCode project.hasProperty('tenantVersionCode') ? project.tenantVersionCode.toInteger() : 4
+        versionName project.hasProperty('tenantVersionName') ? project.tenantVersionName : "1.0.3"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        // Per-tenant white-label builds override app_name via -PtenantAppName; strings.xml
+        // intentionally has no app_name/title_activity_main entries to avoid a duplicate-resource clash.
+        resValue "string", "app_name", project.hasProperty('tenantAppName') ? project.tenantAppName : "Mahima Ministries"
+        resValue "string", "title_activity_main", project.hasProperty('tenantAppName') ? project.tenantAppName : "Mahima Ministries"
 
         aaptOptions {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile rootProject.file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+                enableV1Signing true
+                enableV2Signing true
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

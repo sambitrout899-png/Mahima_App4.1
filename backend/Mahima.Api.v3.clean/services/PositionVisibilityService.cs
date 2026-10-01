@@ -34,6 +34,9 @@ namespace Mahima.Api.v3.clean.Services
             var requested = httpContext.Request.Headers.TryGetValue(HeaderName, out var header) && long.TryParse(header.FirstOrDefault(), out var hid)
                 ? hid
                 : (long?)null;
+            var tenantId = Guid.TryParse(httpContext.User.FindFirstValue("tenant_id"), out var parsedTenantId)
+                ? parsedTenantId
+                : Guid.Empty;
 
             await Mahima.Api.v3.clean.Controllers.PositionsController.EnsurePositionTablesAsync(conn);
             var rows = new List<(long Id, string Name, string Scope, bool Primary)>();
@@ -41,10 +44,11 @@ namespace Mahima.Api.v3.clean.Services
 SELECT p.id, p.name, p.visibility_scope, up.is_primary
 FROM public.user_positions up
 JOIN public.positions p ON p.id = up.position_id AND p.is_active = true
-WHERE up.user_id = @user_id
+WHERE up.user_id = @user_id AND p.tenant_id = @tenant_id
 ORDER BY up.is_primary DESC, p.name;", conn))
             {
                 cmd.Parameters.AddWithValue("user_id", NpgsqlDbType.Uuid, userId);
+                cmd.Parameters.AddWithValue("tenant_id", NpgsqlDbType.Uuid, tenantId);
                 await using var rdr = await cmd.ExecuteReaderAsync();
                 while (await rdr.ReadAsync())
                     rows.Add((rdr.GetInt64(0), rdr.GetString(1), rdr.GetString(2), rdr.GetBoolean(3)));
@@ -72,22 +76,24 @@ ORDER BY up.is_primary DESC, p.name;", conn))
                 PositionId = selected.Id,
                 PositionName = selected.Name,
                 VisibilityScope = selected.Scope,
-                PositionTreeIds = await LoadPositionTreeIdsAsync(conn, selected.Id)
+                PositionTreeIds = await LoadPositionTreeIdsAsync(conn, tenantId, selected.Id)
             };
         }
 
-        private static async Task<IReadOnlyList<long>> LoadPositionTreeIdsAsync(NpgsqlConnection conn, long positionId)
+        private static async Task<IReadOnlyList<long>> LoadPositionTreeIdsAsync(NpgsqlConnection conn, Guid tenantId, long positionId)
         {
             var ids = new List<long>();
             await using var cmd = new NpgsqlCommand(@"
 WITH RECURSIVE position_tree AS (
-    SELECT id FROM public.positions WHERE id = @id
+    SELECT id FROM public.positions WHERE id = @id AND tenant_id = @tenant_id
     UNION ALL
     SELECT p.id FROM public.positions p
     JOIN position_tree pt ON p.parent_position_id = pt.id
+    WHERE p.tenant_id = @tenant_id
 )
 SELECT id FROM position_tree;", conn);
             cmd.Parameters.AddWithValue("id", NpgsqlDbType.Bigint, positionId);
+            cmd.Parameters.AddWithValue("tenant_id", NpgsqlDbType.Uuid, tenantId);
             await using var rdr = await cmd.ExecuteReaderAsync();
             while (await rdr.ReadAsync()) ids.Add(rdr.GetInt64(0));
             return ids;

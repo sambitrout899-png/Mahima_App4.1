@@ -265,8 +265,8 @@ const getUserName = (id) => {
             className="flex justify-between items-center py-2 border-b text-sm"
           >
             <div>
-              <strong>{getUserName(a.userId) || a.userId}</strong> •{" "}
-              {formatDate(a.date)} •{" "}
+              <strong>{getUserName(a.userId) || a.userId}</strong> â€¢{" "}
+              {formatDate(a.date)} â€¢{" "}
               <span
                 className={`px-2 py-1 rounded text-xs ${
                   a.status === "Present"
@@ -329,8 +329,8 @@ const getUserName = (id) => {
             className="flex justify-between items-center py-2 border-b text-sm"
           >
             <div>
-              <strong>{getUserName(t.userId)}</strong> •{" "}
-              {formatDate(t.date)} • {t.hours}h
+              <strong>{getUserName(t.userId)}</strong> â€¢{" "}
+              {formatDate(t.date)} â€¢ {t.hours}h
             </div>
 
             <button

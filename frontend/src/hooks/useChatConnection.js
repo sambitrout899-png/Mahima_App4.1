@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import * as signalR from "@microsoft/signalr";
 import { API_BASE } from "../api";
+import { readSharedAuthToken } from "../utils/sharedAuthCookie";
 
 function normalizeToken(token) {
   const value = String(token || "").trim();
@@ -32,6 +33,8 @@ function getStoredToken(preferredKey = "mahima_token") {
         if (raw) break;
       }
     }
+
+    if (!raw) raw = readSharedAuthToken();
 
     return normalizeToken(raw);
   } catch {

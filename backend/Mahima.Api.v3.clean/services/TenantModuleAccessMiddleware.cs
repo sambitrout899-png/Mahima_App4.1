@@ -14,6 +14,7 @@ namespace Mahima.Api.v3.clean.Services
             "/api/auth",
             "/api/public",
             "/api/tenants/current/entitlements",
+            "/api/tenants/current/storage",
             "/api/tenant-admin/landing",
             "/api/users",
             "/api/roles",
@@ -41,6 +42,7 @@ namespace Mahima.Api.v3.clean.Services
                 ("/api/accounting", LicensingService.OperationsModule),
                 ("/api/reports", LicensingService.OperationsModule),
                 ("/api/audit", LicensingService.OperationsModule),
+                ("/api/volunteer-shifts", LicensingService.OperationsModule),
 
                 ("/api/pastor", LicensingService.CareMinistryModule),
                 ("/api/pastorbot", LicensingService.CareMinistryModule),
@@ -49,6 +51,9 @@ namespace Mahima.Api.v3.clean.Services
                 ("/api/baptism", LicensingService.CareMinistryModule),
                 ("/api/baptisms", LicensingService.CareMinistryModule),
                 ("/api/counselling", LicensingService.CareMinistryModule),
+                ("/api/events", LicensingService.CareMinistryModule),
+                ("/api/checkin", LicensingService.CareMinistryModule),
+                ("/api/service-plans", LicensingService.CareMinistryModule),
 
                 ("/api/roles", LicensingService.AdminToolsModule),
                 ("/api/pages", LicensingService.AdminToolsModule),
@@ -83,6 +88,16 @@ namespace Mahima.Api.v3.clean.Services
                 return;
             }
 
+            // Public/free endpoints must bypass tenant resolution as well as
+            // module checks. Anonymous app-release clients do not have tenant
+            // claims, and resolving a tenant before reaching [AllowAnonymous]
+            // can fail before the controller action runs.
+            if (IsFreeApiPath(context.Request.Method, path))
+            {
+                await _next(context);
+                return;
+            }
+
             if (!path.StartsWith("/api/auth", StringComparison.Ordinal) &&
                 !path.StartsWith("/api/public", StringComparison.Ordinal))
             {
@@ -99,12 +114,6 @@ namespace Mahima.Api.v3.clean.Services
                     }));
                     return;
                 }
-            }
-
-            if (IsFreeApiPath(context.Request.Method, path))
-            {
-                await _next(context);
-                return;
             }
 
             var moduleCode = FindModuleCode(path);
@@ -138,6 +147,12 @@ namespace Mahima.Api.v3.clean.Services
 
         private static bool IsFreeApiPath(string method, string path)
         {
+            if (HttpMethods.IsGet(method) &&
+                path.StartsWith("/api/app-releases", StringComparison.Ordinal) &&
+                (path.EndsWith("/latest", StringComparison.Ordinal) ||
+                 path.EndsWith("/android/download", StringComparison.Ordinal)))
+                return true;
+
             if (HttpMethods.IsGet(method) &&
                 (path.Equals("/api/pages", StringComparison.Ordinal) ||
                  path.StartsWith("/api/pages/", StringComparison.Ordinal)))

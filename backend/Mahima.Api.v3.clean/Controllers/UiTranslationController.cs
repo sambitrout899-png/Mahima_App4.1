@@ -12,6 +12,9 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.EntityFrameworkCore;
+using Mahima.Api.v3.clean.Data;
 
 namespace Mahima.Api.v3.clean.Controllers
 {
@@ -20,26 +23,19 @@ namespace Mahima.Api.v3.clean.Controllers
     [Route("api/ui-translation")]
     public class UiTranslationController : ControllerBase
     {
-        private static readonly Dictionary<string, string> LanguageNames = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["en"] = "English",
-            ["hi"] = "Hindi",
-            ["pa"] = "Punjabi",
-            ["or"] = "Odia",
-            ["ta"] = "Tamil",
-            ["mr"] = "Marathi",
-            ["ne"] = "Nepali"
-        };
-
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IConfiguration _config;
         private readonly ILogger<UiTranslationController> _logger;
+        private readonly MahimaDbContext _db;
+        private readonly IMemoryCache _cache;
 
-        public UiTranslationController(IHttpClientFactory httpClientFactory, IConfiguration config, ILogger<UiTranslationController> logger)
+        public UiTranslationController(IHttpClientFactory httpClientFactory, IConfiguration config, ILogger<UiTranslationController> logger, MahimaDbContext db, IMemoryCache cache)
         {
             _httpClientFactory = httpClientFactory;
             _config = config;
             _logger = logger;
+            _db = db;
+            _cache = cache;
         }
 
         public class UiTranslationRequest
@@ -55,12 +51,15 @@ namespace Mahima.Api.v3.clean.Controllers
             public Dictionary<string, string> Translations { get; set; } = new();
         }
 
-        [AllowAnonymous]
         [HttpPost("batch")]
         [RequestSizeLimit(64_000)]
         public async Task<ActionResult<UiTranslationResponse>> Batch([FromBody] UiTranslationRequest request, CancellationToken ct)
         {
             var language = NormalizeLanguage(request?.Language);
+            if (language == null) return BadRequest(new { message = "A valid language code is required." });
+            var configuredLanguage = await _db.AppLanguages.AsNoTracking()
+                .FirstOrDefaultAsync(l => l.Code == language && l.Enabled, ct);
+            if (configuredLanguage == null) return BadRequest(new { message = "That language is not enabled." });
             var texts = (request?.Texts ?? new List<string>())
                 .Select(NormalizeText)
                 .Where(IsSafeUiText)
@@ -77,18 +76,32 @@ namespace Mahima.Api.v3.clean.Controllers
                 return Ok(response);
             }
 
-            var languageName = ResolveLanguageName(language, request?.LanguageName);
-            var prompt = BuildPrompt(languageName, texts);
+            var languageName = configuredLanguage.Name;
+            var cached = new Dictionary<string, string>(StringComparer.Ordinal);
+            var missing = new List<string>();
+            foreach (var text in texts)
+            {
+                if (_cache.TryGetValue<string>($"ui-translation:{language}:{text}", out var value) && !string.IsNullOrWhiteSpace(value))
+                    cached[text] = value;
+                else missing.Add(text);
+            }
+            if (missing.Count == 0)
+            {
+                response.Translations = cached;
+                return Ok(response);
+            }
+            var prompt = BuildPrompt(languageName, missing);
 
             try
             {
                 var answer = await TranslateWithConfiguredAiAsync(prompt, ct);
-                var parsed = ParseTranslationMap(answer, texts);
+                var parsed = ParseTranslationMap(answer, missing);
+                foreach (var pair in parsed)
+                    _cache.Set($"ui-translation:{language}:{pair.Key}", pair.Value, TimeSpan.FromDays(30));
                 response.Translations = texts.ToDictionary(
                     text => text,
-                    text => parsed.TryGetValue(text, out var translated) && !string.IsNullOrWhiteSpace(translated)
-                        ? translated.Trim()
-                        : text,
+                    text => cached.TryGetValue(text, out var cachedValue) ? cachedValue :
+                        parsed.TryGetValue(text, out var translated) && !string.IsNullOrWhiteSpace(translated) ? translated.Trim() : text,
                     StringComparer.Ordinal);
             }
             catch (Exception ex)
@@ -100,17 +113,10 @@ namespace Mahima.Api.v3.clean.Controllers
             return Ok(response);
         }
 
-        private static string NormalizeLanguage(string? language)
+        private static string? NormalizeLanguage(string? language)
         {
             var value = (language ?? "en").Trim().ToLowerInvariant();
-            return LanguageNames.ContainsKey(value) ? value : "en";
-        }
-
-        private static string ResolveLanguageName(string language, string? requestedName)
-        {
-            var name = (requestedName ?? string.Empty).Trim();
-            if (!string.IsNullOrWhiteSpace(name) && name.Length <= 40) return name;
-            return LanguageNames.TryGetValue(language, out var known) ? known : "English";
+            return Regex.IsMatch(value, "^[a-z]{2,3}(?:-[a-z0-9]{2,4})?$") ? value : null;
         }
 
         private static string NormalizeText(string? text) =>
@@ -141,7 +147,7 @@ namespace Mahima.Api.v3.clean.Controllers
 
         private async Task<string?> TranslateWithConfiguredAiAsync(string prompt, CancellationToken ct)
         {
-            var apiKey = _config["PastorBot:OpenAiApiKey"];
+            var apiKey = _config["PastorBot:ApiKey"] ?? _config["PastorBot:OpenAiApiKey"];
             if (string.IsNullOrWhiteSpace(apiKey)) return null;
 
             var model = _config["PastorBot:Model"] ?? "gpt-4.1";

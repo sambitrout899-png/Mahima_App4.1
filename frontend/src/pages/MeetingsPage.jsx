@@ -30,12 +30,12 @@ export default function MeetingsPage(){
       </div>
 
       <div className='space-y-2'>
-        {isLoading && <div className='p-4 bg-white rounded shadow-sm'>Loadingâ€¦</div>}
+        {isLoading && <div className='p-4 bg-white rounded shadow-sm'>Loading…</div>}
         {!isLoading && (data||[]).map(m=>(
           <div key={m.id} className='p-3 bg-white rounded shadow-sm flex justify-between items-center'>
             <div>
               <div className='font-medium'>{m.title}</div>
-              <div className='text-xs text-gray-500'>{m.time} â€¢ {m.link}</div>
+              <div className='text-xs text-gray-500'>{m.time} • {m.link}</div>
             </div>
             <div className='flex items-center gap-2'>
               <button onClick={()=>startEdit(m)} className='px-3 py-1 border rounded text-sm'>Edit</button>

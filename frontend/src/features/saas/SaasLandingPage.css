@@ -1,0 +1,48 @@
+.saas-register-page {
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  min-height: 100dvh;
+  /* Let the document own vertical scrolling. A fixed 100dvh nested scroller
+     can become non-scrollable after browser chrome or the virtual keyboard
+     changes the visual viewport. */
+  overflow-x: clip;
+  background: #06131b;
+}
+
+.saas-register-page::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -3;
+  background-image: linear-gradient(90deg, rgba(3, 12, 18, .06), rgba(3, 12, 18, .3) 48%, rgba(3, 12, 18, .68)), var(--saas-hero);
+  background-position: center;
+  background-size: cover;
+}
+
+.saas-register-page::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background: radial-gradient(circle at 18% 24%, rgba(251, 191, 36, .2), transparent 34%), linear-gradient(180deg, transparent 48%, rgba(6,19,27,.9) 96%);
+}
+
+.saas-topbar { background: rgba(3, 12, 18, .62); backdrop-filter: blur(18px); }
+.saas-register-card { background: linear-gradient(145deg, rgba(12, 27, 35, .88), rgba(7, 19, 27, .78)); backdrop-filter: blur(24px); box-shadow: 0 30px 80px rgba(0,0,0,.42); }
+.saas-display { text-shadow: 0 10px 40px rgba(0,0,0,.46); }
+.saas-display span { color: #fbbf24; background: linear-gradient(120deg, #fff3c4, #fbbf24 65%, #f59e0b); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.saas-submit-button { background: linear-gradient(115deg, #fef3c7, #fbbf24 52%, #f59e0b); box-shadow: 0 14px 35px rgba(245,158,11,.25); transition: transform .2s ease, box-shadow .2s ease; }
+.saas-submit-button:hover { transform: translateY(-2px); box-shadow: 0 18px 42px rgba(245,158,11,.36); }
+.saas-icon-button { display:grid; place-items:center; width:42px; height:42px; border-radius:999px; border:1px solid rgba(255,255,255,.18); color:#d1fae5; background:rgba(255,255,255,.08); backdrop-filter:blur(12px); transition:.2s ease; }
+.saas-icon-button:hover { background:rgba(255,255,255,.16); transform:scale(1.04); }
+.saas-field { color-scheme: dark; }
+
+.saas-stars { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+.saas-stars span { position:absolute; top:-8vh; width:var(--star-size); height:var(--star-size); border-radius:50%; background:#fde68a; box-shadow:0 0 12px rgba(251,191,36,.9); opacity:var(--star-opacity); animation:saas-star-fall var(--star-duration) linear infinite; animation-delay:var(--star-delay); }
+@keyframes saas-star-fall { 0% { transform:translate3d(0,-10vh,0) scale(.7); } 50% { transform:translate3d(24px,50vh,0) scale(1); } 100% { transform:translate3d(-18px,110vh,0) scale(.45); } }
+
+@media (max-width: 768px) {
+  .saas-register-page::before { background-image:linear-gradient(180deg, rgba(3,12,18,.14), rgba(3,12,18,.72) 44%, #06131b 94%), var(--saas-hero); background-position:28% center; }
+}
+@media (prefers-reduced-motion: reduce) { .saas-stars span { animation:none; } .saas-submit-button { transition:none; } }

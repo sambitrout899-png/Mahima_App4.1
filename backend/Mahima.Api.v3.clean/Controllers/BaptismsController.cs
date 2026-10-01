@@ -9,8 +9,11 @@ using Mahima.Api.v3.clean;
 using Mahima.Api.v3.clean.Models;
 using Mahima.Api.v3.clean.Services;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace Mahima.Api.v3.clean.Controllers
 {
@@ -48,7 +51,10 @@ namespace Mahima.Api.v3.clean.Controllers
         public string? BaptismPlace { get; set; }
         public DateTime? CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
+        public List<BaptismCertificateAttachmentDto> SignedCertificates { get; set; } = new();
     }
+
+    public record BaptismCertificateAttachmentDto(long Id, string Filename, long? SizeBytes, DateTime UploadedAt);
 
     public class BaptismRequestDetailDto : BaptismRequestListItemDto
     {
@@ -70,12 +76,32 @@ namespace Mahima.Api.v3.clean.Controllers
     {
         private readonly MahimaDbContext _db;
         private readonly IBaptismCertificateService _certificateService;
+        private readonly ITenantPrintTemplateService _printTemplates;
+        private readonly ILogger<BaptismsController> _logger;
         private static readonly Guid RootTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        private const string SignedCertificateOwner = "baptism-signed-certificate";
+        private const long MaxCertificateBytes = 10 * 1024 * 1024;
+        private readonly string _signedCertificateRoot;
+        private readonly string _generatedCertificateRoot;
 
-        public BaptismsController(MahimaDbContext db, IBaptismCertificateService certificateService)
+        public BaptismsController(
+            MahimaDbContext db,
+            IBaptismCertificateService certificateService,
+            ITenantPrintTemplateService printTemplates,
+            IWebHostEnvironment environment,
+            IConfiguration configuration,
+            ILogger<BaptismsController> logger)
         {
             _db = db;
             _certificateService = certificateService;
+            _printTemplates = printTemplates;
+            _logger = logger;
+            // Private, non-web-exposed roots, tenant-scoped subfolders created on demand.
+            // Must match BaptismCertificateService's own resolution of the generated root.
+            _signedCertificateRoot = Path.GetFullPath(configuration["BaptismCertificates:SignedRoot"]
+                ?? Path.Combine(environment.ContentRootPath, "App_Data", "baptism-certificates", "signed"));
+            _generatedCertificateRoot = Path.GetFullPath(configuration["BaptismCertificates:GeneratedRoot"]
+                ?? Path.Combine(environment.ContentRootPath, "App_Data", "baptism-certificates", "generated"));
         }
 
         // ---------- helpers ----------
@@ -108,23 +134,25 @@ namespace Mahima.Api.v3.clean.Controllers
                 ? id
                 : RootTenantId;
 
-        private async Task<BaptismRequest?> FindBaptismRequestAsync(int id)
+        // Strictly tenant-scoped, no cross-tenant fallback -- a baptism certificate must
+        // never be resolvable outside the tenant that owns it, root tenant included.
+        private Task<BaptismRequest?> FindBaptismRequestAsync(int id)
         {
             var tenantId = GetCurrentTenantId();
-            var query = _db.BaptismRequests.AsQueryable();
-
-            if (tenantId != RootTenantId)
-                query = query.Where(b => b.TenantId == tenantId);
-
-            var entity = await query.FirstOrDefaultAsync(b => b.Id == id);
-            if (entity != null)
-                return entity;
-
-            // Certificate downloads can be opened in a new browser tab where the
-            // Authorization header is not sent. The baptism ID is globally unique,
-            // so this fallback prevents false "not found" responses for tenant PDFs.
-            return await _db.BaptismRequests.FirstOrDefaultAsync(b => b.Id == id);
+            return _db.BaptismRequests.FirstOrDefaultAsync(b => b.Id == id && b.TenantId == tenantId);
         }
+
+        private static BaptismCertificateAttachmentDto ToAttachmentDto(Attachment a) =>
+            new(a.Id, a.Filename ?? "Signed certificate", a.SizeBytes, a.UploadedAt);
+
+        internal static string? SignedCertificateContentType(string filename, byte[] bytes) =>
+            Path.GetExtension(filename).ToLowerInvariant() switch
+            {
+                ".pdf" when bytes.AsSpan().StartsWith("%PDF-"u8) => "application/pdf",
+                ".png" when bytes.AsSpan().StartsWith(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }) => "image/png",
+                ".jpg" or ".jpeg" when bytes.AsSpan().StartsWith(new byte[] { 255, 216, 255 }) => "image/jpeg",
+                _ => null
+            };
 
         private static BaptismRequestListItemDto ToListItem(BaptismRequest e) =>
             new()
@@ -210,6 +238,17 @@ namespace Mahima.Api.v3.clean.Controllers
                 .Select(b => ToListItem(b))
                 .ToListAsync();
 
+            var ids = list.Select(b => (long)b.Id).ToList();
+            var attachmentsByOwner = (await _db.Attachments.AsNoTracking()
+                    .Where(a => a.TenantId == tenantId && a.OwnerType == SignedCertificateOwner && ids.Contains(a.OwnerId))
+                    .OrderByDescending(a => a.UploadedAt)
+                    .ToListAsync())
+                .GroupBy(a => a.OwnerId)
+                .ToDictionary(g => g.Key, g => g.Select(ToAttachmentDto).ToList());
+
+            foreach (var item in list)
+                item.SignedCertificates = attachmentsByOwner.TryGetValue(item.Id, out var atts) ? atts : new();
+
             return Ok(list);
         }
 
@@ -221,7 +260,11 @@ namespace Mahima.Api.v3.clean.Controllers
             var entity = await _db.BaptismRequests.FirstOrDefaultAsync(b => b.Id == id && b.TenantId == tenantId);
             if (entity == null) return NotFound();
 
-            return Ok(ToDetail(entity));
+            var detail = ToDetail(entity);
+            detail.SignedCertificates = (await _db.Attachments.AsNoTracking()
+                .Where(a => a.TenantId == tenantId && a.OwnerType == SignedCertificateOwner && a.OwnerId == id)
+                .OrderByDescending(a => a.UploadedAt).ToListAsync()).Select(ToAttachmentDto).ToList();
+            return Ok(detail);
         }
 
         // POST /api/baptisms
@@ -331,11 +374,17 @@ namespace Mahima.Api.v3.clean.Controllers
             }
 
             if (string.IsNullOrWhiteSpace(entity.BaptismPlace))
-                entity.BaptismPlace = "Mahima Ministry";
+            {
+                var printTemplate = await _printTemplates.GetAsync(tenantId, HttpContext.RequestAborted);
+                entity.BaptismPlace = !string.IsNullOrWhiteSpace(printTemplate.Address)
+                    ? printTemplate.Address
+                    : printTemplate.OrganizationName;
+            }
 
-            // Generate and store certificate
+            // Generate and store certificate (a private relative path, not a public URL --
+            // see IBaptismCertificateService)
             var pdfUrl = await _certificateService.GenerateCertificateAsync(entity);
-            entity.CertificatePdfUrl = pdfUrl; // usually "/certificates/baptisms/<file>.pdf"
+            entity.CertificatePdfUrl = pdfUrl;
 
             entity.Status = "TokenGenerated";
             entity.UpdatedAt = DateTime.UtcNow;
@@ -366,56 +415,130 @@ namespace Mahima.Api.v3.clean.Controllers
             return NoContent();
         }
 
+        // POST /api/baptisms/{id}/signed-certificates  (upload a scanned/signed consent document)
+        [HttpPost("{id:int}/signed-certificates")]
+        [RequestSizeLimit(MaxCertificateBytes + 1024 * 1024)]
+        [RequestFormLimits(MultipartBodyLengthLimit = MaxCertificateBytes + 1024 * 1024)]
+        public async Task<IActionResult> UploadSignedCertificate(int id, [FromForm] IFormFile? file)
+        {
+            if (file == null || file.Length == 0 || file.Length > MaxCertificateBytes)
+                return BadRequest("Choose a non-empty PDF, JPG, or PNG file up to 10 MB.");
+
+            var tenantId = GetCurrentTenantId();
+            var entity = await _db.BaptismRequests.FirstOrDefaultAsync(b => b.Id == id && b.TenantId == tenantId);
+            if (entity == null) return NotFound("Baptism record not found.");
+
+            using var memory = new MemoryStream();
+            await file.CopyToAsync(memory);
+            var bytes = memory.ToArray();
+            var filename = Path.GetFileName(file.FileName.Replace('\\', '/'));
+            var contentType = SignedCertificateContentType(filename, bytes);
+            if (contentType == null)
+                return BadRequest("The file must be a PDF, JPG, or PNG matching its file extension.");
+
+            var key = $"{Guid.NewGuid():N}{Path.GetExtension(filename).ToLowerInvariant()}";
+            var tenantDir = Path.Combine(_signedCertificateRoot, tenantId.ToString("N"));
+            Directory.CreateDirectory(tenantDir);
+            var path = Path.Combine(tenantDir, key);
+            try
+            {
+                await System.IO.File.WriteAllBytesAsync(path, bytes);
+                var attachment = new Attachment
+                {
+                    TenantId = tenantId,
+                    OwnerType = SignedCertificateOwner,
+                    OwnerId = id,
+                    S3Key = key,
+                    Filename = filename,
+                    ContentType = contentType,
+                    SizeBytes = bytes.LongLength,
+                    UploadedBy = Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var uid) ? uid : null,
+                    UploadedAt = DateTime.UtcNow
+                };
+                _db.Attachments.Add(attachment);
+                entity.UpdatedAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync();
+                return Ok(ToAttachmentDto(attachment));
+            }
+            catch
+            {
+                if (System.IO.File.Exists(path)) System.IO.File.Delete(path);
+                throw;
+            }
+        }
+
+        // GET /api/baptisms/{id}/signed-certificates/{attachmentId}
+        [HttpGet("{id:int}/signed-certificates/{attachmentId:long}")]
+        public async Task<IActionResult> DownloadSignedCertificate(int id, long attachmentId)
+        {
+            var tenantId = GetCurrentTenantId();
+            if (!await _db.BaptismRequests.AnyAsync(b => b.Id == id && b.TenantId == tenantId)) return NotFound();
+
+            var attachment = await _db.Attachments.AsNoTracking().FirstOrDefaultAsync(a =>
+                a.Id == attachmentId && a.OwnerId == id && a.OwnerType == SignedCertificateOwner && a.TenantId == tenantId);
+            if (attachment == null) return NotFound();
+
+            var path = Path.Combine(_signedCertificateRoot, tenantId.ToString("N"), Path.GetFileName(attachment.S3Key));
+            if (!System.IO.File.Exists(path)) return NotFound("Signed certificate file not found.");
+            return PhysicalFile(path, attachment.ContentType ?? "application/octet-stream", attachment.Filename);
+        }
+
         // DELETE /api/baptisms/{id} (admin only)
         [HttpDelete("{id:int}")]
         [Authorize(Roles = "ADMIN,Admin,admin")]
         public async Task<IActionResult> Delete(int id)
         {
-            var entity = await _db.BaptismRequests.FindAsync(id);
+            var tenantId = GetCurrentTenantId();
+            var entity = await _db.BaptismRequests.FirstOrDefaultAsync(b => b.Id == id && b.TenantId == tenantId);
             if (entity == null) return NotFound();
 
+            var attachments = await _db.Attachments
+                .Where(a => a.TenantId == tenantId && a.OwnerType == SignedCertificateOwner && a.OwnerId == id)
+                .ToListAsync();
+            _db.Attachments.RemoveRange(attachments);
             _db.BaptismRequests.Remove(entity);
             await _db.SaveChangesAsync();
+
+            var tenantSignedDir = Path.Combine(_signedCertificateRoot, tenantId.ToString("N"));
+            foreach (var attachment in attachments)
+            {
+                try
+                {
+                    System.IO.File.Delete(Path.Combine(tenantSignedDir, Path.GetFileName(attachment.S3Key)));
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _logger.LogWarning(ex, "Could not remove signed certificate attachment {AttachmentId}", attachment.Id);
+                }
+            }
+
             return NoContent();
         }
 
         // GET /api/baptisms/{id}/certificate  (serve PDF by streaming the file)
+        // Authenticated + strictly tenant-scoped (via FindBaptismRequestAsync) -- the PDF lives
+        // in a private, non-web-exposed, tenant-scoped directory, never under wwwroot.
         [HttpGet("{id:int}/certificate")]
-        [AllowAnonymous]
         public async Task<IActionResult> DownloadCertificate(int id)
         {
             var entity = await FindBaptismRequestAsync(id);
             if (entity == null)
                 return NotFound("Baptism request not found.");
 
-            // Base folder: <project>/wwwroot/certificates/baptisms
-            var baseDir = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
-            var certDir = Path.Combine(baseDir, "certificates", "baptisms");
-
+            var certDir = Path.Combine(_generatedCertificateRoot, entity.TenantId.ToString("N"));
             Directory.CreateDirectory(certDir);
 
             string? physicalPath = null;
 
-            // 1) Try to use the path stored in the DB (CertificatePdfUrl)
+            // 1) Try to use the path stored in the DB (CertificatePdfUrl -- a relative path
+            // like "{tenantId}/BaptismCertificate_2_....pdf", never a rooted/public URL now)
             if (!string.IsNullOrWhiteSpace(entity.CertificatePdfUrl))
             {
-                var certPath = entity.CertificatePdfUrl.Trim();
-
-                if (Path.IsPathRooted(certPath))
-                {
-                    // e.g. "C:\Projects\...\BaptismCertificate_2_....pdf"
-                    physicalPath = certPath;
-                }
-                else
-                {
-                    // e.g. "/certificates/baptisms/BaptismCertificate_2_....pdf"
-                    // or "certificates/baptisms/..." or just "BaptismCertificate_2_....pdf"
-                    var fileName = Path.GetFileName(certPath);
-                    physicalPath = Path.Combine(certDir, fileName);
-                }
+                var fileName = Path.GetFileName(entity.CertificatePdfUrl.Trim());
+                physicalPath = Path.Combine(certDir, fileName);
             }
 
-            // 2) If that file doesn’t exist, fall back to pattern search
+            // 2) If that file doesn't exist, fall back to pattern search within this tenant's folder
             if (string.IsNullOrEmpty(physicalPath) || !System.IO.File.Exists(physicalPath))
             {
                 var pattern = $"BaptismCertificate_{id}_*.pdf";

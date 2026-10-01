@@ -51,6 +51,7 @@ namespace Mahima.Api.v3.clean.Services
         {
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<MahimaDbContext>();
+            var notifications = scope.ServiceProvider.GetRequiredService<INotificationDispatcher>();
             var now = DateTime.UtcNow;
             var renewalWindow = now.AddDays(7);
 
@@ -62,6 +63,14 @@ namespace Mahima.Api.v3.clean.Services
             {
                 license.Status = "expired";
                 license.UpdatedAtUtc = now;
+
+                await notifications.EnqueueAsync(new NotificationRequest(
+                    TenantId: license.TenantId,
+                    Kind: "subscription-expired",
+                    Subject: $"Mahima subscription expired: {license.ModuleCode}",
+                    Message: $"Your \"{license.ModuleCode}\" module subscription expired on {license.EndsAtUtc:yyyy-MM-dd}. Renew it to keep the module active.",
+                    TargetGroup: "tenant-admins",
+                    DedupeKey: $"expired:{license.Id}:{license.EndsAtUtc:yyyyMMdd}"), ct);
             }
 
             var renewableLicenses = await db.TenantModuleLicenses
@@ -97,6 +106,14 @@ namespace Mahima.Api.v3.clean.Services
                     CreatedAtUtc = now,
                     ExpiresAtUtc = license.EndsAtUtc
                 });
+
+                await notifications.EnqueueAsync(new NotificationRequest(
+                    TenantId: license.TenantId,
+                    Kind: "subscription-renewal-due",
+                    Subject: $"Mahima subscription renewal due: {license.ModuleCode}",
+                    Message: $"Your \"{license.ModuleCode}\" module subscription renews on {license.EndsAtUtc:yyyy-MM-dd}. Complete the payment to avoid interruption.",
+                    TargetGroup: "tenant-admins",
+                    DedupeKey: $"renewal-due:{license.Id}:{license.EndsAtUtc:yyyyMMdd}"), ct);
             }
 
             await db.SaveChangesAsync(ct);

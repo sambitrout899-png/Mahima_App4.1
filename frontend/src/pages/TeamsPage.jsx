@@ -30,7 +30,7 @@ export default function TeamsPage(){
       </div>
 
       <div className='space-y-2'>
-        {isLoading && <div className='p-4 bg-white rounded shadow-sm'>Loadingâ€¦</div>}
+        {isLoading && <div className='p-4 bg-white rounded shadow-sm'>Loading…</div>}
         {!isLoading && (data||[]).map(t=>(
           <div key={t.id} className='p-3 bg-white rounded shadow-sm flex justify-between items-center'>
             <div>

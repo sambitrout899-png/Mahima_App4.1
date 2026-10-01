@@ -245,7 +245,7 @@ namespace Mahima.Api.v3.clean.Controllers
         }
 
         [HttpPost("copy")]
-        public IActionResult Copy([FromBody] ServerTransferRequest request)
+        public async Task<IActionResult> Copy([FromBody] ServerTransferRequest request, [FromServices] Mahima.Api.v3.clean.Services.TenantStorageService storage)
         {
             if (request == null || string.IsNullOrWhiteSpace(request.SourcePath))
                 return BadRequest("sourcePath is required.");
@@ -255,6 +255,7 @@ namespace Mahima.Api.v3.clean.Controllers
                 var root = GetRootPath();
                 var source = ResolveSafePath(root, request.SourcePath);
                 var destinationFolder = ResolveSafePath(root, request.DestinationPath);
+                await storage.ReserveFilesAsync(GetCurrentTenantId(), Mahima.Api.v3.clean.Services.TenantStorageService.DirectoryBytes(source), HttpContext.RequestAborted);
                 Directory.CreateDirectory(destinationFolder);
 
                 var target = UniqueTargetPath(destinationFolder, Path.GetFileName(source));
@@ -271,6 +272,7 @@ namespace Mahima.Api.v3.clean.Controllers
 
                 return Ok(new { message = "Copied.", path = ToRelativePath(root, target) });
             }
+            catch (Mahima.Api.v3.clean.Services.TenantStorageLimitException) { throw; }
             catch (UnauthorizedAccessException ex)
             {
                 _logger.LogWarning(ex, "Server file copy access denied for {Path}", request?.SourcePath);

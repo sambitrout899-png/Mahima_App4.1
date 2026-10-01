@@ -1300,7 +1300,7 @@ function ResourceFormModal({ target, defaultType, onCancel, onSave }) {
   };
 
   return (
-    <div className="fixed inset-0 z-[160] bg-slate-900/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-3" onClick={onCancel}>
+    <div className="fixed inset-0 z-[160] bg-slate-900/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-3">
       <form onSubmit={handleSubmit} onClick={(e) => e.stopPropagation()}
             className="w-full max-w-xl bg-white rounded-2xl shadow-2xl flex flex-col max-h-[92vh]">
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">

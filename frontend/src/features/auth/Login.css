@@ -1,0 +1,62 @@
+.login-experience {
+  position: relative;
+  isolation: isolate;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.login-experience::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -3;
+  background-image: linear-gradient(90deg, rgba(3,12,18,.05), rgba(3,12,18,.26) 50%, rgba(3,12,18,.68)), url('/assets/global-church-vibrant-v2.png');
+  background-position: center;
+  background-size: cover;
+}
+
+.login-experience::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background: radial-gradient(circle at 18% 24%, rgba(251,191,36,.22), transparent 36%), linear-gradient(180deg, transparent 52%, rgba(3,12,18,.76));
+}
+
+.login-shell {
+  width: min(1180px, 100%);
+  min-height: calc(100dvh - 48px);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 420px);
+  align-items: center;
+  gap: clamp(44px, 8vw, 110px);
+}
+
+.login-welcome { max-width: 680px; color: #fff; text-shadow: 0 8px 32px rgba(0,0,0,.42); }
+.login-kicker { display:inline-flex; padding:8px 13px; border:1px solid rgba(167,243,208,.25); border-radius:999px; background:rgba(4,120,87,.2); color:#d1fae5; font-size:12px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; backdrop-filter:blur(12px); }
+.login-welcome h1 { margin:22px 0 18px; max-width:650px; font-size:clamp(42px,5.2vw,72px); line-height:.98; letter-spacing:-.045em; font-weight:900; }
+.login-welcome h1 span { color:#fbbf24; background:linear-gradient(120deg,#fff3c4,#fbbf24 65%,#f59e0b); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+.login-welcome p { max-width:610px; margin:0; color:rgba(236,253,245,.84); font-size:clamp(17px,1.6vw,21px); line-height:1.65; }
+.login-trust-row { display:flex; flex-wrap:wrap; gap:10px; margin-top:28px; }
+.login-trust-row span { padding:9px 12px; border-radius:12px; border:1px solid rgba(255,255,255,.14); background:rgba(3,12,18,.34); color:#d1fae5; font-size:12px; font-weight:700; backdrop-filter:blur(10px); }
+.login-glass-card { backdrop-filter:blur(24px); }
+.login-glass-card input:focus { border-color:#fbbf24 !important; box-shadow:0 0 0 3px rgba(251,191,36,.16); }
+
+.login-stars { position:fixed; inset:0; z-index:-1; pointer-events:none; overflow:hidden; }
+.login-stars span { position:absolute; top:-8vh; width:var(--star-size); height:var(--star-size); border-radius:50%; background:#fde68a; box-shadow:0 0 12px rgba(251,191,36,.9); opacity:var(--star-opacity); animation:login-star-fall var(--star-duration) linear infinite; animation-delay:var(--star-delay); }
+@keyframes login-star-fall { 0% { transform:translate3d(0,-10vh,0) scale(.7); } 50% { transform:translate3d(24px,50vh,0) scale(1); } 100% { transform:translate3d(-18px,110vh,0) scale(.45); } }
+
+@media (max-width: 860px) {
+  .login-experience { padding:18px !important; }
+  .login-experience::before { background-image:linear-gradient(180deg,rgba(3,12,18,.12),rgba(3,12,18,.72) 46%,#06131b),url('/assets/global-church-vibrant-v2.png'); background-position:28% center; }
+  .login-shell { min-height:auto; grid-template-columns:1fr; gap:28px; padding:34px 0; }
+  .login-welcome { text-align:center; margin:0 auto; }
+  .login-welcome h1 { font-size:clamp(38px,11vw,56px); }
+  .login-welcome p { font-size:16px; }
+  .login-trust-row { justify-content:center; }
+  .login-glass-card { margin:0 auto; }
+}
+
+@media (prefers-reduced-motion: reduce) { .login-stars span { animation:none; } }

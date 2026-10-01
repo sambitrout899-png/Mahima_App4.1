@@ -87,7 +87,7 @@ export default function UsersPageCathedralAdvanced() {
         throw new Error(txt || "Error sending messages");
       }
       const res = await resp.json();
-      alert(`Sent! âœ…\nEmail: ${res.email.success}/${res.email.attempted}\nSMS: ${res.sms.success}/${res.sms.attempted}\nWA: ${res.whatsapp.success}/${res.whatsapp.attempted}`);
+      alert(`Sent! ✅\nEmail: ${res.email.success}/${res.email.attempted}\nSMS: ${res.sms.success}/${res.sms.attempted}\nWA: ${res.whatsapp.success}/${res.whatsapp.attempted}`);
       setShowMessageModal(false);
     } catch (err) {
       alert("Send failed: " + err.message);
@@ -173,7 +173,7 @@ export default function UsersPageCathedralAdvanced() {
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 12 }}>
               <button className="btn btn-muted" onClick={() => setShowMessageModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={sendMessage} disabled={sending}>{sending ? "Sendingâ€¦" : "Send"}</button>
+              <button className="btn btn-primary" onClick={sendMessage} disabled={sending}>{sending ? "Sending…" : "Send"}</button>
             </div>
           </div>
         </div>

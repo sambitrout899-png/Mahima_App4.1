@@ -14,6 +14,7 @@ namespace Mahima.Api.v3.clean.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Microsoft.AspNetCore.Authorization.Authorize]
     public class RolesController : ControllerBase
     {
         private readonly string? _connectionString;
@@ -36,16 +37,20 @@ namespace Mahima.Api.v3.clean.Controllers
             ["COSTS"] = "operations",
             ["REPORTS"] = "operations",
             ["AUDIT_TRAIL"] = "operations",
+            ["VOLUNTEERS"] = "operations",
             ["PASTOR"] = "care_ministry",
             ["README"] = "care_ministry",
             ["MARRIAGE"] = "care_ministry",
             ["BAPTISM"] = "care_ministry",
             ["COUNSELLING"] = "care_ministry",
+            ["EVENTS"] = "care_ministry",
+            ["CHECKIN"] = "care_ministry",
+            ["SERVICE_PLANS"] = "care_ministry",
             ["ADMIN_DASHBOARD"] = "admin_tools",
             ["LIVE_USERS"] = "admin_tools",
             ["MULTITENANT"] = "admin_tools",
             ["LANGUAGES"] = "admin_tools",
-            ["APP_DOWNLOADS"] = "communications",
+            ["APP_DOWNLOADS"] = "base",
             ["MESSAGE_CENTER"] = "communications",
             ["EMAIL_CLIENT"] = "communications",
             ["GOOGLE_DRIVE"] = "communications",
@@ -54,7 +59,7 @@ namespace Mahima.Api.v3.clean.Controllers
 
         private static readonly string[] BasePageKeys =
         {
-            "DASHBOARD", "LANDING_PAGE", "USERS", "PRAYER_REQUESTS", "SERMONS", "TEAMS", "ROLES", "PAGES"
+            "DASHBOARD", "LANDING_PAGE", "USERS", "PRAYER_REQUESTS", "SERMONS", "TEAMS", "ROLES", "PAGES", "APP_DOWNLOADS", "SECURITY"
         };
 
         private Guid GetCurrentTenantId() =>
@@ -99,8 +104,24 @@ WHERE m.enabled = true
           SELECT 1
           FROM public.tenant_module_licenses l
           WHERE l.tenant_id = @tenant_id
+            AND (
+                l.source NOT LIKE 'plan:%'
+                OR NOT EXISTS (
+                    SELECT 1
+                    FROM public.tenant_subscriptions subscription
+                    JOIN public.subscription_plan_publications publication
+                      ON publication.plan_id = subscription.plan_id
+                     AND publication.version = subscription.applied_plan_version
+                    WHERE subscription.tenant_id = @tenant_id
+                      AND publication.definition_json ? 'pages'
+                      AND jsonb_array_length(publication.definition_json->'pages') > 0
+                )
+            )
             AND l.module_code = m.code
             AND l.status = 'active'
+            AND (l.source NOT LIKE 'plan:%' OR EXISTS (
+                SELECT 1 FROM public.subscription_plans p WHERE p.enabled AND p.lifecycle_status='published'
+                AND l.source='plan:'||left(replace(p.id::text,'-',''),27)))
             AND l.starts_at_utc <= now()
             AND (l.ends_at_utc IS NULL OR l.ends_at_utc > now())
       )
@@ -114,13 +135,39 @@ WHERE m.enabled = true
                 var code = rdr["code"]?.ToString();
                 if (!string.IsNullOrWhiteSpace(code)) modules.Add(code);
             }
+            await rdr.DisposeAsync();
 
             foreach (var pair in PageModules)
             {
                 if (modules.Contains(pair.Value)) keys.Add(pair.Key);
             }
 
+            await using var packagePages = new NpgsqlCommand(@"
+SELECT DISTINCT page.value
+FROM public.tenant_subscriptions subscription
+JOIN public.subscription_plans plan ON plan.id=subscription.plan_id AND plan.enabled AND plan.lifecycle_status='published'
+JOIN public.subscription_plan_publications publication
+  ON publication.plan_id = subscription.plan_id
+ AND publication.version = subscription.applied_plan_version
+ AND publication.expired_at_utc IS NULL
+CROSS JOIN LATERAL jsonb_array_elements_text(
+  COALESCE(publication.definition_json->'pages', '[]'::jsonb)
+) page(value)
+WHERE subscription.tenant_id = @tenant_id
+  AND subscription.status = 'active'
+  AND subscription.starts_at_utc <= now()
+  AND (subscription.ends_at_utc IS NULL OR subscription.ends_at_utc > now());", conn);
+            packagePages.Parameters.AddWithValue("tenant_id", NpgsqlTypes.NpgsqlDbType.Uuid, tenantId);
+            await using var pageReader = await packagePages.ExecuteReaderAsync();
+            while (await pageReader.ReadAsync())
+            {
+                var key = pageReader.GetString(0);
+                if (!string.IsNullOrWhiteSpace(key)) keys.Add(key);
+            }
+
             keys.Remove("MULTITENANT");
+            keys.Remove("QA_AUTOMATION");
+            keys.Remove("DIGITAL_MARKETING");
             return keys;
         }
 
@@ -219,6 +266,7 @@ ORDER BY id;";
 
         // POST api/roles
         [HttpPost]
+        [Microsoft.AspNetCore.Authorization.Authorize(Roles = "admin,Admin,ADMIN")]
         public async Task<IActionResult> Create([FromBody] RoleCreateDto dto)
         {
             if (string.IsNullOrWhiteSpace(_connectionString)) return StatusCode(500, "Missing connection string 'DefaultConnection'.");
@@ -268,6 +316,7 @@ ORDER BY id;";
         // PUT api/roles/{id}
         [AcceptVerbs("PUT", "PATCH", "POST")]
         [Route("{id}")]
+        [Microsoft.AspNetCore.Authorization.Authorize(Roles = "admin,Admin,ADMIN")]
         public async Task<IActionResult> Update(int id, [FromBody] RoleUpdateDto dto)
         {
             if (string.IsNullOrWhiteSpace(_connectionString)) return StatusCode(500, "Missing connection string 'DefaultConnection'.");
@@ -336,6 +385,7 @@ ORDER BY id;";
         // DELETE api/roles/{id}
         [AcceptVerbs("DELETE", "POST")]
         [Route("{id}")]
+        [Microsoft.AspNetCore.Authorization.Authorize(Roles = "admin,Admin,ADMIN")]
         public async Task<IActionResult> Delete(int id)
         {
             if (string.IsNullOrWhiteSpace(_connectionString)) return StatusCode(500, "Missing connection string 'DefaultConnection'.");

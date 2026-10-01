@@ -190,14 +190,14 @@ export default function PagesPage() {
     <div className="pages-wrap">
       {Styles}
       {/* Header */}
-      <div className="pages-header" role="region" aria-label="Pages header">
+      <div className="pages-header mahima-standard-page-header" data-mahima-explicit-header="true" role="region" aria-label="Pages header">
         <div style={{ display: "flex", gap: 12, alignItems: "center", flex:1 }}>
           <div className="icon-wrap" aria-hidden>
             <IconPage />
           </div>
           <div>
-            <div className="pages-title">Pages</div>
-            <div className="subtitle">Manage which pages exist in the application and their descriptions.</div>
+            <h1 className="pages-title mahima-standard-page-title" data-mahima-explicit-title="true">Pages</h1>
+            <div className="subtitle mahima-standard-page-subtitle">Manage which pages exist in the application and their descriptions.</div>
           </div>
         </div>
         <div style={{ minWidth: 260, flex:1 }}>

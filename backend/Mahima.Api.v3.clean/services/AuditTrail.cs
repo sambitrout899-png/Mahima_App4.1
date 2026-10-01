@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Mahima.Api.v3.clean.Services
@@ -189,14 +190,19 @@ namespace Mahima.Api.v3.clean.Services
     {
         private readonly RequestDelegate _next;
         private readonly ILogger<AuditTrailMiddleware> _logger;
+        private readonly IServiceScopeFactory _scopeFactory;
 
-        public AuditTrailMiddleware(RequestDelegate next, ILogger<AuditTrailMiddleware> logger)
+        public AuditTrailMiddleware(
+            RequestDelegate next,
+            ILogger<AuditTrailMiddleware> logger,
+            IServiceScopeFactory scopeFactory)
         {
             _next = next;
             _logger = logger;
+            _scopeFactory = scopeFactory;
         }
 
-        public async Task InvokeAsync(HttpContext context, MahimaDbContext db)
+        public async Task InvokeAsync(HttpContext context)
         {
             var sw = Stopwatch.StartNew();
             Exception? failure = null;
@@ -213,16 +219,21 @@ namespace Mahima.Api.v3.clean.Services
             finally
             {
                 sw.Stop();
-                await WriteRequestAuditAsync(context, db, sw.ElapsedMilliseconds, failure);
+                await WriteRequestAuditAsync(context, sw.ElapsedMilliseconds, failure);
             }
         }
 
-        private async Task WriteRequestAuditAsync(HttpContext context, MahimaDbContext db, long elapsedMs, Exception? failure)
+        private async Task WriteRequestAuditAsync(HttpContext context, long elapsedMs, Exception? failure)
         {
             try
             {
                 if (!ShouldAudit(context)) return;
 
+                // Never reuse the request DbContext here. A failed endpoint can leave
+                // stale Modified/Deleted entries tracked, causing an audit save to
+                // replay the endpoint's failed database operations.
+                using var scope = _scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<MahimaDbContext>();
                 var method = context.Request.Method;
                 var path = context.Request.Path.Value ?? "";
                 var actorId = context.User?.GetUserIdGuid();

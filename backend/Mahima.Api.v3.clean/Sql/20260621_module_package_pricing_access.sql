@@ -6,7 +6,7 @@ VALUES
     ('operations', 'Operations Suite', 'Tasks, attendance, payroll, costs, accounting, reports, and audit trail.', 799, false, true, 30, now(), now()),
     ('care_ministry', 'Care Ministry Suite', 'AI Pastor, marriage, baptism, counselling, and pastoral care workflows.', 599, false, true, 40, now(), now()),
     ('admin_tools', 'Administration Suite', 'Roles, pages, admin dashboard, live users, languages, and multi-tenant administration.', 699, false, true, 50, now(), now()),
-    ('communications', 'Communications Suite', 'Message center, email, Google Drive, server files, and app downloads.', 599, false, true, 60, now(), now())
+    ('communications', 'Communications Suite', 'Message center, email, Google Drive, and server files.', 599, false, true, 60, now(), now())
 ON CONFLICT (code) DO UPDATE
 SET
     name = excluded.name,

@@ -161,7 +161,7 @@ import React from "react";
 import { Routes, Route } from "react-router-dom";
 import Layout from "./components/Layout";
 import UsersPage from "./features/users/Page";
-import TeamsPage from "./features/teams/Page";
+import TeamsPage from "./features/teams/TeamsPage";
 import TasksPage from "./features/tasks/Page";
 import SermonsPage from "./features/sermons/Page";
 import PrayerRequestsPage from "./features/prayerrequests/Page";

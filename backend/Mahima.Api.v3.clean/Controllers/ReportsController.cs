@@ -6,8 +6,10 @@ using System.Globalization;
 using System.Linq;
 using System.Security.Claims;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using Mahima.Api.v3.clean.Data;
+using Mahima.Api.v3.clean.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -22,10 +24,12 @@ namespace Mahima.Api.v3.clean.Controllers
         private const string ReportsPageKey = "REPORTS";
         private static readonly Regex SafeIdentifier = new(@"^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.Compiled);
         private readonly MahimaDbContext _db;
+        private readonly ITenantContextService _tenantContext;
 
-        public ReportsController(MahimaDbContext db)
+        public ReportsController(MahimaDbContext db, ITenantContextService tenantContext)
         {
             _db = db;
+            _tenantContext = tenantContext;
         }
 
         [HttpGet("cubes")]
@@ -556,6 +560,14 @@ ORDER BY c.table_name, c.ordinal_position;";
             if (string.IsNullOrWhiteSpace(roleName))
                 return Forbid();
 
+            // This tool runs arbitrary SELECTs against any table in the public schema
+            // with no per-tenant filtering - it must stay platform/root-admin-only,
+            // the same gate every other cross-tenant admin tool uses (tenant admin,
+            // billing, QA automation, digital marketing). A tenant's own "admin" role
+            // must not be sufficient on its own.
+            if (!await CurrentTenantIsRootAsync(HttpContext.RequestAborted))
+                return Forbid();
+
             if (string.Equals(roleName, "admin", StringComparison.OrdinalIgnoreCase))
                 return null;
 
@@ -572,6 +584,22 @@ ORDER BY c.table_name, c.ordinal_position;";
                     row.RoleName.ToLower() == normalizedRole);
 
             return hasAccess ? null : Forbid();
+        }
+
+        private async Task<bool> CurrentTenantIsRootAsync(CancellationToken ct)
+        {
+            var tenantIdText = User.FindFirstValue("tenant_id");
+            if (Guid.TryParse(tenantIdText, out var tenantId))
+            {
+                return await _db.Tenants
+                    .AsNoTracking()
+                    .Where(t => t.Id == tenantId)
+                    .Select(t => t.IsRootTenant)
+                    .FirstOrDefaultAsync(ct);
+            }
+
+            var tenant = await _tenantContext.GetCurrentTenantAsync(ct);
+            return tenant?.IsRootTenant == true;
         }
 
         private sealed class TableMetadata

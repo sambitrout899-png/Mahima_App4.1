@@ -1,9 +1,10 @@
 ﻿using Mahima.Api.v3.clean.Data;
 using Mahima.Api.v3.clean.Models;
+using Mahima.Api.v3.clean.Services;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System;
@@ -11,6 +12,8 @@ using System.IO;
 using System.Linq;
 using System.Security.Claims;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Mahima.Api.v3.clean.Controllers
@@ -22,44 +25,91 @@ namespace Mahima.Api.v3.clean.Controllers
         private const long MaxApkBytes = 2L * 1024L * 1024L * 1024L;
 
         private readonly IConfiguration _config;
-        private readonly IWebHostEnvironment _env;
         private readonly MahimaDbContext _db;
+        private readonly ITenantContextService _tenantContext;
+        private readonly AppReleasePublishingService _publisher;
         private readonly ILogger<AppReleasesController> _logger;
 
         public AppReleasesController(
             IConfiguration config,
-            IWebHostEnvironment env,
             MahimaDbContext db,
+            ITenantContextService tenantContext,
+            AppReleasePublishingService publisher,
             ILogger<AppReleasesController> logger)
         {
             _config = config;
-            _env = env;
             _db = db;
+            _tenantContext = tenantContext;
+            _publisher = publisher;
             _logger = logger;
+        }
+
+        private static string? NormalizeTenantSlug(string? slug) => AppReleasePublishingService.NormalizeTenantSlug(slug);
+
+        private async Task<bool> CanManageTenantReleaseAsync(string tenantSlug, CancellationToken ct)
+        {
+            var currentTenant = await _tenantContext.GetCurrentTenantAsync(ct);
+            if (currentTenant?.IsRootTenant == true) return true;
+
+            var target = await _db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == tenantSlug, ct);
+            return target != null && currentTenant?.Id == target.Id;
         }
 
         [AllowAnonymous]
         [HttpGet("latest")]
-        public IActionResult Latest()
+        public IActionResult Latest() => LatestInternal(null);
+
+        [AllowAnonymous]
+        [HttpGet("{tenantSlug}/latest")]
+        public IActionResult LatestForTenant(string tenantSlug)
         {
-            var writableManifestPath = GetWritableVersionManifestPath();
-            if (System.IO.File.Exists(writableManifestPath))
-                return PhysicalFile(writableManifestPath, "application/json");
+            var normalized = NormalizeTenantSlug(tenantSlug);
+            if (normalized == null) return NotFound("Unknown tenant.");
+            return LatestInternal(normalized);
+        }
 
-            var publicManifestPath = GetPublicVersionManifestPath();
-            if (System.IO.File.Exists(publicManifestPath))
-                return PhysicalFile(publicManifestPath, "application/json");
+        private IActionResult LatestInternal(string? tenantSlug)
+        {
+            try
+            {
+                // A public GET must not attempt to create release directories.
+                var writableManifestPath = _publisher.GetWritableVersionManifestReadPath(tenantSlug);
+                if (System.IO.File.Exists(writableManifestPath))
+                    return ReadManifestForCurrentHost(writableManifestPath, tenantSlug);
 
-            var baseUrl = PublicBaseUrl();
+                var publicManifestPath = _publisher.GetPublicVersionManifestReadPath(tenantSlug);
+                if (System.IO.File.Exists(publicManifestPath))
+                    return ReadManifestForCurrentHost(publicManifestPath, tenantSlug);
+
+                if (tenantSlug != null)
+                    return LatestInternal(null);
+            }
+            catch (Exception ex)
+            {
+                // Release discovery is public and non-critical. Never turn a
+                // filesystem mount, permission, or malformed-path problem into
+                // a broken downloads page.
+                _logger.LogWarning(ex, "Could not probe app release metadata for tenant {TenantSlug}; returning configured defaults.", tenantSlug ?? "global");
+            }
+
+            return DefaultReleaseInfo();
+        }
+
+        private IActionResult DefaultReleaseInfo()
+        {
+            string baseUrl;
+            try { baseUrl = _publisher.PublicBaseUrl(); }
+            catch { baseUrl = _config["AppReleases:PublicBaseUrl"] ?? "https://app.mahimaministries.in"; }
+            var version = _config["AppReleases:DefaultVersion"] ?? "0.1.0";
             return Ok(new
             {
-                latestVersion = _config["AppReleases:DefaultVersion"] ?? "0.1.0",
+                latestVersion = version,
                 minSupportedVersion = _config["AppReleases:MinSupportedVersion"] ?? "0.1.0",
                 message = "New version of the Mahima App is available - Please upgrade now",
                 downloadPageUrl = $"{baseUrl}/#/app-downloads",
                 android = new
                 {
-                    latestVersion = _config["AppReleases:DefaultVersion"] ?? "0.1.0",
+                    latestVersion = version,
                     minSupportedVersion = _config["AppReleases:MinSupportedVersion"] ?? "0.1.0",
                     build = "Latest APK",
                     apkUrl = $"{baseUrl}/downloads/mahima-app.apk",
@@ -69,35 +119,124 @@ namespace Mahima.Api.v3.clean.Controllers
             });
         }
 
+        private IActionResult ReadManifestForCurrentHost(string manifestPath, string? tenantSlug = null)
+        {
+            try
+            {
+                var manifest = JsonNode.Parse(System.IO.File.ReadAllText(manifestPath))?.AsObject();
+                if (manifest == null)
+                    throw new JsonException("The app release manifest is empty.");
+
+                var baseUrl = _publisher.PublicBaseUrl();
+                var downloadPageSegment = tenantSlug != null ? $"t/{tenantSlug}/app-downloads" : "app-downloads";
+                var downloadRouteSegment = tenantSlug != null ? $"{tenantSlug}/android/download" : "android/download";
+                var downloadsFolder = tenantSlug != null ? $"downloads/{tenantSlug}" : "downloads";
+                manifest["downloadPageUrl"] = $"{baseUrl}/#/{downloadPageSegment}";
+
+                if (manifest["android"] is JsonObject android)
+                {
+                    var versionedFileName = android["versionedFileName"]?.GetValue<string>();
+                    android["apkUrl"] = $"{baseUrl}/{downloadsFolder}/mahima-app.apk";
+                    android["downloadUrl"] = $"{baseUrl}/api/app-releases/{downloadRouteSegment}";
+                    if (!string.IsNullOrWhiteSpace(versionedFileName))
+                        android["versionedApkUrl"] = $"{baseUrl}/{downloadsFolder}/{Uri.EscapeDataString(versionedFileName)}";
+                }
+
+                if (manifest["ios"] is JsonObject ios)
+                    ios["url"] = $"{baseUrl}/#/{downloadPageSegment}";
+
+                return Content(manifest.ToJsonString(new JsonSerializerOptions { WriteIndented = true }), "application/json");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Could not read app release manifest {ManifestPath}", manifestPath);
+                return DefaultReleaseInfo();
+            }
+        }
+
 
         [AllowAnonymous]
         [HttpGet("android/download")]
-        public IActionResult DownloadAndroid()
-        {
-            var latestPath = FindLatestApkPath();
-            if (string.IsNullOrWhiteSpace(latestPath) || !System.IO.File.Exists(latestPath))
-                return NotFound("The Mahima Android APK has not been published yet.");
+        public IActionResult DownloadAndroid() => DownloadAndroidInternal(null);
 
-            Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
-            Response.Headers["Pragma"] = "no-cache";
-            Response.Headers["X-Content-Type-Options"] = "nosniff";
-            return PhysicalFile(
-                latestPath,
-                "application/vnd.android.package-archive",
-                "mahima-app.apk",
-                enableRangeProcessing: true);
+        [AllowAnonymous]
+        [HttpGet("{tenantSlug}/android/download")]
+        public IActionResult DownloadAndroidForTenant(string tenantSlug)
+        {
+            var normalized = NormalizeTenantSlug(tenantSlug);
+            if (normalized == null) return NotFound("Unknown tenant.");
+            return DownloadAndroidInternal(normalized);
         }
+
+        private IActionResult DownloadAndroidInternal(string? tenantSlug)
+        {
+            try
+            {
+                var latestPath = _publisher.FindLatestApkPath(tenantSlug) ?? (tenantSlug != null ? _publisher.FindLatestApkPath(null) : null);
+                if (string.IsNullOrWhiteSpace(latestPath) || !System.IO.File.Exists(latestPath))
+                    return NotFound("The Mahima Android APK has not been published yet.");
+
+                Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
+                Response.Headers["Pragma"] = "no-cache";
+                Response.Headers["X-Content-Type-Options"] = "nosniff";
+                return PhysicalFile(
+                    latestPath,
+                    "application/vnd.android.package-archive",
+                    tenantSlug != null ? $"mahima-app-{tenantSlug}.apk" : "mahima-app.apk",
+                    enableRangeProcessing: true);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Could not resolve the published Android APK for download.");
+                return Problem(statusCode: StatusCodes.Status500InternalServerError,
+                    title: "APK download failed",
+                    detail: "The published APK could not be opened. Verify the app-release directory permissions.");
+            }
+        }
+
         [Authorize(Roles = "admin,ADMIN")]
         [HttpPost("android")]
         [RequestSizeLimit(MaxApkBytes)]
         [RequestFormLimits(MultipartBodyLengthLimit = MaxApkBytes)]
-        public async Task<IActionResult> UploadAndroid(
+        public Task<IActionResult> UploadAndroid(
             [FromForm] IFormFile file,
             [FromForm] string version,
             [FromForm] string? build,
             [FromForm] string? minSupportedVersion,
             [FromForm] string? releaseNotes,
             [FromForm] bool forceUpgrade = false)
+            => UploadAndroidInternal(null, file, version, build, minSupportedVersion, releaseNotes, forceUpgrade);
+
+        [Authorize(Roles = "admin,ADMIN")]
+        [HttpPost("{tenantSlug}/android")]
+        [RequestSizeLimit(MaxApkBytes)]
+        [RequestFormLimits(MultipartBodyLengthLimit = MaxApkBytes)]
+        public async Task<IActionResult> UploadAndroidForTenant(
+            string tenantSlug,
+            [FromForm] IFormFile file,
+            [FromForm] string version,
+            [FromForm] string? build,
+            [FromForm] string? minSupportedVersion,
+            [FromForm] string? releaseNotes,
+            [FromForm] bool forceUpgrade = false)
+        {
+            var normalized = NormalizeTenantSlug(tenantSlug);
+            if (normalized == null) return BadRequest("Invalid tenant.");
+
+            if (!await CanManageTenantReleaseAsync(normalized, HttpContext.RequestAborted))
+                return Forbid();
+
+            return await UploadAndroidInternal(normalized, file, version, build, minSupportedVersion, releaseNotes, forceUpgrade);
+        }
+
+        private async Task<IActionResult> UploadAndroidInternal(
+            string? tenantSlug,
+            IFormFile file,
+            string version,
+            string? build,
+            string? minSupportedVersion,
+            string? releaseNotes,
+            bool forceUpgrade)
         {
             if (file == null || file.Length == 0)
                 return BadRequest("APK file is required.");
@@ -112,16 +251,7 @@ namespace Mahima.Api.v3.clean.Controllers
             if (!extension.Equals(".apk", StringComparison.OrdinalIgnoreCase))
                 return BadRequest("Only Android .apk files are allowed.");
 
-            var downloadsRoot = GetWritableDownloadsRoot();
-            var publicDownloadsRoot = GetPublicDownloadsRoot();
-
-            var cleanVersion = CleanForFileName(version);
-            var cleanBuild = CleanForFileName(string.IsNullOrWhiteSpace(build) ? DateTime.UtcNow.ToString("yyyyMMddHHmmss") : build);
-            var versionedFileName = $"mahima-app-{cleanVersion}-{cleanBuild}.apk";
-            var versionedPath = Path.Combine(downloadsRoot, versionedFileName);
-            var latestPath = Path.Combine(downloadsRoot, "mahima-app.apk");
-            var publicVersionedPath = Path.Combine(publicDownloadsRoot, versionedFileName);
-            var publicLatestPath = Path.Combine(publicDownloadsRoot, "mahima-app.apk");
+            var downloadsRoot = _publisher.GetWritableDownloadsRoot(tenantSlug);
             var tempPath = Path.Combine(downloadsRoot, $".{Guid.NewGuid():N}.upload");
 
             try
@@ -131,88 +261,24 @@ namespace Mahima.Api.v3.clean.Controllers
                     await file.CopyToAsync(stream, HttpContext.RequestAborted);
                 }
 
-                System.IO.File.Move(tempPath, versionedPath, overwrite: true);
-                System.IO.File.Copy(versionedPath, latestPath, overwrite: true);
-                TryMirrorFile(versionedPath, publicVersionedPath);
-                TryMirrorFile(latestPath, publicLatestPath);
-
-                var now = DateTime.UtcNow;
-                var baseUrl = PublicBaseUrl();
-                var apkUrl = $"{baseUrl}/downloads/mahima-app.apk";
-                var downloadUrl = $"{baseUrl}/api/app-releases/android/download";
-                var versionedApkUrl = $"{baseUrl}/downloads/{Uri.EscapeDataString(versionedFileName)}";
-                var normalizedMinVersion = string.IsNullOrWhiteSpace(minSupportedVersion) ? version : minSupportedVersion.Trim();
-                var message = forceUpgrade
-                    ? "A required Mahima App update is available - Please upgrade now"
-                    : "New version of the Mahima App is available - Please upgrade now";
-
-                var manifest = new
-                {
-                    latestVersion = version.Trim(),
-                    minSupportedVersion = normalizedMinVersion,
-                    message,
-                    downloadPageUrl = $"{baseUrl}/#/app-downloads",
-                    updatedAtUtc = now,
-                    android = new
-                    {
-                        latestVersion = version.Trim(),
-                        minSupportedVersion = normalizedMinVersion,
-                        build = string.IsNullOrWhiteSpace(build) ? cleanBuild : build.Trim(),
-                        releaseDate = now.ToString("yyyy-MM-dd"),
-                        apkUrl,
-                        downloadUrl,
-                        versionedApkUrl,
-                        fileName = "mahima-app.apk",
-                        versionedFileName,
-                        sizeBytes = file.Length,
-                        forceUpgrade,
-                        releaseNotes = releaseNotes ?? ""
-                    },
-                    ios = new
-                    {
-                        latestVersion = _config["AppReleases:IosVersion"] ?? version.Trim(),
-                        minSupportedVersion = _config["AppReleases:IosMinSupportedVersion"] ?? normalizedMinVersion,
-                        url = _config["AppReleases:IosUrl"] ?? $"{baseUrl}/#/app-downloads"
-                    }
-                };
-
-                var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
-                var json = JsonSerializer.Serialize(manifest, jsonOptions);
-                await System.IO.File.WriteAllTextAsync(GetWritableVersionManifestPath(), json, HttpContext.RequestAborted);
-
-                try
-                {
-                    await System.IO.File.WriteAllTextAsync(GetPublicVersionManifestPath(), json, HttpContext.RequestAborted);
-                    await System.IO.File.WriteAllTextAsync(Path.Combine(publicDownloadsRoot, "app-release-manifest.json"), json, HttpContext.RequestAborted);
-                }
-                catch (Exception manifestEx)
-                {
-                    _logger.LogWarning(manifestEx, "Could not mirror app release manifest to public web root. API manifest was saved.");
-                }
-
-                _db.AuditLogs.Add(new AuditLog
-                {
-                    ActorId = CurrentUserId(),
-                    Action = "UploadAndroidApk",
-                    EntityType = "AppRelease",
-                    EntityId = version.Trim(),
-                    Details = $"Uploaded {versionedFileName}; durable latest updated and public /downloads/mahima-app.apk mirror refreshed",
-                    CreatedAt = now
-                });
-                await _db.SaveChangesAsync(HttpContext.RequestAborted);
+                var manifest = await _publisher.PublishAsync(
+                    tenantSlug, tempPath, version, build, minSupportedVersion, releaseNotes, forceUpgrade,
+                    CurrentUserId(), HttpContext.RequestAborted);
 
                 return Ok(manifest);
             }
             catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to upload Android APK {FileName}", file.FileName);
+                return StatusCode(500, "Could not upload Android APK.");
+            }
+            finally
             {
                 try
                 {
                     if (System.IO.File.Exists(tempPath)) System.IO.File.Delete(tempPath);
                 }
                 catch {}
-
-                _logger.LogError(ex, "Failed to upload Android APK {FileName}", file.FileName);
-                return StatusCode(500, "Could not upload Android APK.");
             }
         }
 
@@ -225,160 +291,5 @@ namespace Mahima.Api.v3.clean.Controllers
             return Guid.TryParse(raw, out var id) ? id : null;
         }
 
-        private string GetPublicRoot()
-        {
-            var configured =
-                _config["AppReleases:PublicRoot"] ??
-                Environment.GetEnvironmentVariable("MAHIMA_WEB_ROOT");
-
-            if (string.IsNullOrWhiteSpace(configured))
-            {
-                configured = OperatingSystem.IsLinux()
-                    ? "/var/www/mahima"
-                    : (_env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot"));
-            }
-
-            Directory.CreateDirectory(configured);
-            return Path.GetFullPath(configured);
-        }
-
-        private string GetPublicVersionManifestPath() =>
-            Path.Combine(GetPublicRoot(), "app-version.json");
-
-        private string GetPublicDownloadsRoot()
-        {
-            var root = Path.Combine(GetPublicRoot(), "downloads");
-            Directory.CreateDirectory(root);
-            return root;
-        }
-
-        private string GetWritableReleaseRoot()
-        {
-            var configured =
-                _config["AppReleases:WritableRoot"] ??
-                Environment.GetEnvironmentVariable("MAHIMA_RELEASE_ROOT");
-
-            if (string.IsNullOrWhiteSpace(configured))
-            {
-                configured = OperatingSystem.IsLinux()
-                    ? "/var/lib/mahima/app-releases"
-                    : Path.Combine(_env.ContentRootPath, "App_Data", "app-releases");
-            }
-
-            Directory.CreateDirectory(configured);
-            return Path.GetFullPath(configured);
-        }
-
-        private string GetWritableVersionManifestPath() =>
-            Path.Combine(GetWritableReleaseRoot(), "app-version.json");
-
-        private string GetWritableDownloadsRoot()
-        {
-            var root = Path.Combine(GetWritableReleaseRoot(), "downloads");
-            Directory.CreateDirectory(root);
-            return root;
-        }
-
-        private string? FindLatestApkPath()
-        {
-            var publicDownloadsRoot = GetPublicDownloadsRoot();
-            var writableDownloadsRoot = GetWritableDownloadsRoot();
-            var publicLatestPath = Path.Combine(publicDownloadsRoot, "mahima-app.apk");
-            var writableLatestPath = Path.Combine(writableDownloadsRoot, "mahima-app.apk");
-
-            if (System.IO.File.Exists(publicLatestPath))
-                return publicLatestPath;
-
-            if (System.IO.File.Exists(writableLatestPath))
-            {
-                TryMirrorFile(writableLatestPath, publicLatestPath);
-                return writableLatestPath;
-            }
-
-            var manifestVersionedFile = TryReadVersionedApkFileName(GetWritableVersionManifestPath()) ??
-                                        TryReadVersionedApkFileName(GetPublicVersionManifestPath());
-            if (!string.IsNullOrWhiteSpace(manifestVersionedFile))
-            {
-                var writableVersionedPath = Path.Combine(writableDownloadsRoot, manifestVersionedFile);
-                var publicVersionedPath = Path.Combine(publicDownloadsRoot, manifestVersionedFile);
-
-                if (System.IO.File.Exists(writableVersionedPath))
-                {
-                    TryMirrorFile(writableVersionedPath, publicVersionedPath);
-                    TryMirrorFile(writableVersionedPath, publicLatestPath);
-                    return writableVersionedPath;
-                }
-
-                if (System.IO.File.Exists(publicVersionedPath))
-                {
-                    TryMirrorFile(publicVersionedPath, publicLatestPath);
-                    return publicVersionedPath;
-                }
-            }
-
-            return null;
-        }
-
-        private string? TryReadVersionedApkFileName(string manifestPath)
-        {
-            try
-            {
-                if (!System.IO.File.Exists(manifestPath)) return null;
-
-                using var stream = System.IO.File.OpenRead(manifestPath);
-                using var document = JsonDocument.Parse(stream);
-                if (!document.RootElement.TryGetProperty("android", out var android)) return null;
-
-                if (android.TryGetProperty("versionedFileName", out var versionedFileName))
-                    return versionedFileName.GetString();
-
-                if (android.TryGetProperty("fileName", out var fileName))
-                    return fileName.GetString();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Could not read APK file name from app release manifest {ManifestPath}", manifestPath);
-            }
-
-            return null;
-        }
-
-        private void TryMirrorFile(string sourcePath, string destinationPath)
-        {
-            try
-            {
-                var destinationDirectory = Path.GetDirectoryName(destinationPath);
-                if (!string.IsNullOrWhiteSpace(destinationDirectory))
-                    Directory.CreateDirectory(destinationDirectory);
-
-                if (System.IO.File.Exists(sourcePath))
-                    System.IO.File.Copy(sourcePath, destinationPath, overwrite: true);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Could not mirror file {SourcePath} to {DestinationPath}", sourcePath, destinationPath);
-            }
-        }
-
-        private string PublicBaseUrl()
-        {
-            var configured =
-                _config["AppReleases:PublicBaseUrl"] ??
-                Environment.GetEnvironmentVariable("MAHIMA_PUBLIC_BASE_URL");
-            if (!string.IsNullOrWhiteSpace(configured))
-                return configured.TrimEnd('/');
-
-            var scheme = Request.Headers["X-Forwarded-Proto"].FirstOrDefault() ?? Request.Scheme;
-            var host = Request.Headers["X-Forwarded-Host"].FirstOrDefault() ?? Request.Host.Value;
-            return $"{scheme}://{host}".TrimEnd('/');
-        }
-
-        private static string CleanForFileName(string value)
-        {
-            var clean = string.Join("-", (value ?? "").Trim().Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
-            clean = clean.Replace(' ', '-').Replace('/', '-').Replace('\\', '-');
-            return string.IsNullOrWhiteSpace(clean) ? DateTime.UtcNow.ToString("yyyyMMddHHmmss") : clean;
-        }
     }
 }
-

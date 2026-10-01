@@ -9,9 +9,8 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Mahima Frontend</title>
 
-    <!-- fonts -->
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <!-- First-party font: preloaded locally so the shell never swaps between
+         a Windows fallback and a late Google Fonts response. -->
 
     <style>
       html,body {
@@ -55,7 +54,7 @@
           // Use the same host that .env.production / .env.mobile uses
           // to avoid certificate-SAN mismatches between www. and bare domain.
           window.__API_BASE__ = isCapacitor
-            ? "https://mahimaministries.in/api"
+            ? "https://beta.mahimaministries.in/api"
             : "/api";
 
           console.info("window.__API_BASE__ set to", window.__API_BASE__, "(capacitor:", isCapacitor + ")");
@@ -72,5 +71,3 @@
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
-
-

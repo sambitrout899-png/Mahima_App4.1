@@ -859,7 +859,7 @@ export default function TeamsPage() {
             radial-gradient(circle at 100% 0%, rgba(4,120,87,.08), transparent 28rem) !important;
           color: var(--enterprise-ink, #102033) !important;
         }
-        .teams-header,
+        .teams-header:not(.mahima-standard-page-header),
         .team-card,
         .teams-modal,
         .teams-search-wrap {
@@ -868,12 +868,12 @@ export default function TeamsPage() {
           background: var(--enterprise-surface, #ffffff) !important;
           box-shadow: var(--enterprise-shadow-sm, 0 1px 2px rgba(15,23,42,.05)) !important;
         }
-        .teams-title,
+        .teams-title:not(.mahima-standard-page-title),
         .team-card-title,
         .teams-modal-title {
           color: var(--enterprise-ink, #102033) !important;
         }
-        .teams-subtitle,
+        .teams-subtitle:not(.mahima-standard-page-subtitle),
         .team-card-desc,
         .team-meta {
           color: var(--enterprise-muted, #617086) !important;
@@ -906,12 +906,38 @@ export default function TeamsPage() {
           background: var(--enterprise-primary-soft, #ecfdf5) !important;
           color: var(--enterprise-primary-strong, #065f46) !important;
         }
+        #mahima-teams-page-header.teams-header.mahima-standard-page-header {
+          padding: clamp(22px, 2.3vw, 32px) !important;
+          border: 1px solid rgba(255,255,255,.14) !important;
+          border-radius: 22px !important;
+          background:
+            radial-gradient(circle at 87% -18%, rgba(255,255,255,.2), transparent 19rem),
+            linear-gradient(118deg, #07815f 0%, #087456 56%, #12654f 100%) !important;
+          color: #ffffff !important;
+          box-shadow: 0 18px 42px rgba(5,96,68,.18) !important;
+        }
+        #mahima-teams-page-header.teams-header.mahima-standard-page-header .teams-title {
+          color: #ffffff !important;
+        }
+        #mahima-teams-page-header.teams-header.mahima-standard-page-header .teams-subtitle {
+          color: rgba(242,252,248,.9) !important;
+        }
+        #mahima-teams-page-header.teams-header.mahima-standard-page-header .team-icon-btn {
+          border-color: rgba(255,255,255,.3) !important;
+          background: rgba(255,255,255,.15) !important;
+          color: #ffffff !important;
+          box-shadow: none !important;
+        }
+        #mahima-teams-page-header.teams-header.mahima-standard-page-header .teams-search-wrap {
+          background: transparent !important;
+          box-shadow: none !important;
+        }
       `}</style>
 
-      <div className="teams-header">
+      <div id="mahima-teams-page-header" className="teams-header mahima-standard-page-header" data-mahima-explicit-header="true">
         <div>
-          <h2 className="teams-title">Teams</h2>
-          <div className="teams-subtitle">Manage ministry teams and their members.</div>
+          <h1 className="teams-title mahima-standard-page-title" data-mahima-explicit-title="true">Teams</h1>
+          <div className="teams-subtitle mahima-standard-page-subtitle">Manage ministry teams and their members.</div>
         </div>
 
         <div className="teams-toolbar">

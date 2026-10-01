@@ -10,6 +10,7 @@ using Mahima.Api.v3.clean.Extensions;
 using Mahima.Api.v3.clean.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
 namespace Mahima.Api.v3.clean.Controllers
@@ -23,23 +24,31 @@ namespace Mahima.Api.v3.clean.Controllers
 
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IPastorBotService _pastorBot;
+        private readonly IMemoryCache _cache;
         private readonly ILogger<TodayUpdatesController> _logger;
 
         public TodayUpdatesController(
             IHttpClientFactory httpClientFactory,
             IPastorBotService pastorBot,
+            IMemoryCache cache,
             ILogger<TodayUpdatesController> logger)
         {
             _httpClientFactory = httpClientFactory;
             _pastorBot = pastorBot;
+            _cache = cache;
             _logger = logger;
         }
 
         [HttpGet]
-        public async Task<IActionResult> Get([FromQuery] double? lat, [FromQuery] double? lon, [FromQuery] string? timezone)
+        public async Task<IActionResult> Get([FromQuery] double? lat, [FromQuery] double? lon, [FromQuery] string? timezone, [FromQuery] bool refresh = false)
         {
             if (lat.HasValue && (lat < -90 || lat > 90)) return BadRequest("Invalid latitude.");
             if (lon.HasValue && (lon < -180 || lon > 180)) return BadRequest("Invalid longitude.");
+
+            var cacheKey = $"faith-wire:{Math.Round(lat ?? 0, 1)}:{Math.Round(lon ?? 0, 1)}:{timezone?.Trim().ToLowerInvariant()}";
+            if (_cache.TryGetValue(cacheKey, out TodayUpdateResponse? cached) && cached != null &&
+                (!refresh || DateTime.UtcNow - cached.GeneratedAtUtc < TimeSpan.FromMinutes(5)))
+                return Ok(cached);
 
             var ct = HttpContext.RequestAborted;
             var client = _httpClientFactory.CreateClient("PastorBot");
@@ -70,14 +79,16 @@ namespace Mahima.Api.v3.clean.Controllers
             var israelWatch = await israelWatchTask;
             var christianUpdate = await BuildChristianUpdateAsync(location, articles, ct);
 
-            return Ok(new TodayUpdateResponse
+            var response = new TodayUpdateResponse
             {
                 Location = location,
                 Weather = weather,
                 ChristianUpdate = christianUpdate,
                 IsraelWatch = israelWatch,
                 GeneratedAtUtc = DateTime.UtcNow
-            });
+            };
+            _cache.Set(cacheKey, response, TimeSpan.FromMinutes(20));
+            return Ok(response);
         }
 
         private async Task<LocationDto> ResolveLocationAsync(HttpClient client, double? lat, double? lon, string? timezone, CancellationToken ct)
@@ -353,33 +364,33 @@ namespace Mahima.Api.v3.clean.Controllers
             var region = string.IsNullOrWhiteSpace(location.Label) ? "your area" : location.Label;
             var today = DateTime.UtcNow.ToString("MMMM d, yyyy", Invariant);
 
-            if (articles.Count == 0)
-            {
-                return new ChristianUpdateDto
-                {
-                    Summary = $"No verified Christian-specific local headlines were found for {region} right now. Today, keep the focus on prayer, fellowship, and checking your local church announcements.",
-                    Articles = articles
-                };
-            }
-
             try
             {
-                var headlines = string.Join("\n", articles.Select((article, index) => $"{index + 1}. [{article.Category}] {article.Title} ({article.Source})"));
+                var headlines = articles.Count == 0
+                    ? "No verified Christian-specific headlines were returned by the news feed. Do not invent news."
+                    : string.Join("\n", articles.Select((article, index) => $"{index + 1}. [{article.Category}] {article.Title} ({article.Source})"));
                 var prompt = $@"Create a fresh Live Faith Wire briefing for {region} for {today}.
 Use only these verified public headlines; do not invent details:
 {headlines}
 
-Cover: local Christian updates, global Christian news, words/messages from preachers or Christian teachers, meetings/conferences/prayer gatherings, and sensitive Christian news where present.
-Write 4 concise bullets and one prayer focus. Keep it pastoral, factual, cautious, and avoid sensational claims. For sensitive news, use careful wording and encourage prayer, verification, and pastoral wisdom.";
+Return exactly these four single-line fields:
+BRIEFING: a factual summary of at most 35 words based only on the supplied headlines
+VERSE: one context-appropriate KJV Bible reference and a quotation of at most 30 words
+REFLECTION: one fresh Christian encouragement of at most 24 words
+PRAYER: one prayer focus of at most 20 words
+Keep it pastoral and cautious. Never present prophecy speculation as news.";
 
                 var userId = User.GetUserIdGuid();
                 using var summaryTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 summaryTimeout.CancelAfter(TimeSpan.FromSeconds(5));
                 var reply = await _pastorBot.AskAsync(userId, prompt, false, "en", "english-teaching-guide", null, summaryTimeout.Token);
+                var fields = ParseFaithWireFields(reply.Answer);
                 return new ChristianUpdateDto
                 {
-                    Summary = string.IsNullOrWhiteSpace(reply.Answer) ? FallbackUpdate(region, articles) : reply.Answer,
-                    Articles = articles
+                    Summary = fields.GetValueOrDefault("BRIEFING") ?? FallbackUpdate(region, articles),
+                    Articles = articles,
+                    FaithItems = new[] { fields.GetValueOrDefault("VERSE"), fields.GetValueOrDefault("REFLECTION"), fields.GetValueOrDefault("PRAYER") }
+                        .Where(value => !string.IsNullOrWhiteSpace(value)).Cast<string>().ToArray()
                 };
             }
             catch (Exception ex)
@@ -388,9 +399,44 @@ Write 4 concise bullets and one prayer focus. Keep it pastoral, factual, cautiou
                 return new ChristianUpdateDto
                 {
                     Summary = FallbackUpdate(region, articles),
-                    Articles = articles
+                    Articles = articles,
+                    FaithItems = DailyFallbackFaithItems()
                 };
             }
+        }
+
+        private static Dictionary<string, string> ParseFaithWireFields(string? answer)
+        {
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var rawLine in (answer ?? string.Empty).Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var line = rawLine.Trim().TrimStart('-', '*', ' ');
+                var separator = line.IndexOf(':');
+                if (separator <= 0) continue;
+                var key = line[..separator].Replace("*", string.Empty).Trim().ToUpperInvariant();
+                if (key is not ("BRIEFING" or "VERSE" or "REFLECTION" or "PRAYER")) continue;
+                var value = line[(separator + 1)..].Replace("**", string.Empty).Trim();
+                if (!string.IsNullOrWhiteSpace(value)) result[key] = value;
+            }
+            return result;
+        }
+
+        private static IReadOnlyList<string> DailyFallbackFaithItems()
+        {
+            var verses = new[]
+            {
+                "Psalm 118:24 — This is the day which the Lord hath made; we will rejoice and be glad in it.",
+                "Proverbs 3:5 — Trust in the Lord with all thine heart; and lean not unto thine own understanding.",
+                "Philippians 4:13 — I can do all things through Christ which strengtheneth me.",
+                "Psalm 46:1 — God is our refuge and strength, a very present help in trouble.",
+                "Matthew 5:16 — Let your light so shine before men, that they may see your good works."
+            };
+            return new[]
+            {
+                verses[DateTime.UtcNow.DayOfYear % verses.Length],
+                "Reflection: Receive today as a fresh opportunity to love God and serve someone faithfully.",
+                "Prayer: Ask for wisdom, unity, protection, and courage for churches and believers today."
+            };
         }
 
         private static string FallbackUpdate(string region, IReadOnlyList<ArticleDto> articles)
@@ -463,6 +509,7 @@ Write 4 concise bullets and one prayer focus. Keep it pastoral, factual, cautiou
         {
             public string Summary { get; set; } = "";
             public IReadOnlyList<ArticleDto> Articles { get; set; } = Array.Empty<ArticleDto>();
+            public IReadOnlyList<string> FaithItems { get; set; } = Array.Empty<string>();
         }
 
         public class ArticleDto

@@ -4,6 +4,7 @@ import axios from "axios";
 import { getToken as authGetToken } from "../features/auth/authService";
 import { API_BASE as ROOT_API_BASE } from "../api";
 import { createWorkflowStyles } from "./ministryWorkflowStyles";
+import { printMinistryToken } from "../utils/printMinistryToken";
 
 const API_BASE = `${ROOT_API_BASE}/baptisms`;
 
@@ -77,6 +78,10 @@ export default function BaptismsPage() {
   const [form, setForm] = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState(null);
+  const [attachmentRecord, setAttachmentRecord] = useState(null);
+  const [certificateFile, setCertificateFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [attachmentError, setAttachmentError] = useState("");
 
   const stats = useMemo(() => {
     return {
@@ -108,6 +113,70 @@ export default function BaptismsPage() {
       setError("Failed to load baptism requests.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function uploadSignedCertificate(e) {
+    e.preventDefault();
+    if (!certificateFile || !/\.(pdf|jpe?g|png)$/i.test(certificateFile.name) ||
+        certificateFile.size === 0 || certificateFile.size > 10 * 1024 * 1024) {
+      setAttachmentError("Choose a non-empty PDF, JPG, or PNG file up to 10 MB.");
+      return;
+    }
+    setUploading(true);
+    setAttachmentError("");
+    try {
+      const data = new FormData();
+      data.append("file", certificateFile);
+      await axios.post(`${API_BASE}/${attachmentRecord.id}/signed-certificates`, data, { headers: authHeaders() });
+      setAttachmentRecord(null);
+      setCertificateFile(null);
+      await loadRequests();
+    } catch (err) {
+      setAttachmentError(typeof err?.response?.data === "string" ? err.response.data : "Upload failed. Please try again.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function downloadSignedCertificate(id, attachment) {
+    setError("");
+    try {
+      const response = await axios.get(`${API_BASE}/${id}/signed-certificates/${attachment.id}`, {
+        headers: authHeaders(), responseType: "blob",
+      });
+      const url = URL.createObjectURL(response.data);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = attachment.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      setError("Could not download the signed certificate. Please try again.");
+    }
+  }
+
+  // The generated certificate endpoint requires auth now (it used to be anonymous, which
+  // let anyone with the URL fetch any tenant's certificate) -- so this is a blob-fetch +
+  // client-side download trigger instead of a plain <a target="_blank"> link.
+  async function downloadCertificate(id) {
+    setError("");
+    try {
+      const response = await axios.get(`${API_BASE}/${id}/certificate`, {
+        headers: authHeaders(), responseType: "blob",
+      });
+      const url = URL.createObjectURL(response.data);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `BaptismCertificate_${id}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      setError("Could not download the certificate. Please try again.");
     }
   }
 
@@ -251,6 +320,28 @@ export default function BaptismsPage() {
 
       {error && <div style={styles.error}>{error}</div>}
 
+      {attachmentRecord && (
+        <section style={styles.formCard} aria-label="Attach signed certificate">
+          <h2 style={styles.formTitle}>Attach Signed Certificate</h2>
+          <p style={styles.formSub}>For {attachmentRecord.fullName}. Upload an already signed PDF, JPG, or PNG (up to 10 MB).</p>
+          <form onSubmit={uploadSignedCertificate}>
+            <label style={styles.field}>
+              <span style={styles.label}>Signed certificate file</span>
+              <input key={attachmentRecord.id} type="file" accept=".pdf,.jpg,.jpeg,.png" required disabled={uploading}
+                onChange={(e) => { setCertificateFile(e.target.files?.[0] || null); setAttachmentError(""); }} />
+            </label>
+            {attachmentError && <p role="alert" style={styles.error}>{attachmentError}</p>}
+            <div style={styles.formActions}>
+              <button type="button" disabled={uploading} style={styles.secondaryButton}
+                onClick={() => { setAttachmentRecord(null); setCertificateFile(null); }}>Cancel</button>
+              <button type="submit" disabled={uploading || !certificateFile} style={styles.darkButton}>
+                {uploading ? "Uploading..." : "Upload Signed Certificate"}
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
+
       {creating && (
         <div style={styles.formCard}>
           <div style={styles.formHeader}>
@@ -375,9 +466,7 @@ export default function BaptismsPage() {
                 onClick={() => setStatusFilter(tab.key)}
                 style={{
                   ...styles.tab,
-                  background: active ? tab.tone : "#fff",
-                  color: active ? "#fff" : "#334155",
-                  boxShadow: active ? `0 12px 24px ${tab.tone}33` : "none",
+                  ...(active ? styles.activeTab : {}),
                 }}
               >
                 {tab.label}
@@ -423,8 +512,18 @@ export default function BaptismsPage() {
                     onVerify={handleVerifyChurch}
                     onConsent={handleMarkConsent}
                     onToken={handleGenerateToken}
+                    onPrint={(item) => printMinistryToken({ ministry: "Baptism", token: item.token, personName: item.fullName, date: item.preferredDate, location: item.preferredService, status: item.status })}
                     onComplete={handleComplete}
                     onDelete={handleDelete}
+                    onAttach={() => {
+                      setAttachmentRecord(request);
+                      setCertificateFile(null);
+                      setAttachmentError("");
+                      window.scrollTo({ top: 0, behavior: "smooth" });
+                    }}
+                    attachmentBusy={uploading}
+                    onDownloadAttachment={downloadSignedCertificate}
+                    onDownloadCertificate={downloadCertificate}
                   />
                 ))
               )}
@@ -436,7 +535,7 @@ export default function BaptismsPage() {
   );
 }
 
-function BaptismRow({ item, isLoading, onVerify, onConsent, onToken, onComplete, onDelete }) {
+function BaptismRow({ item, isLoading, onVerify, onConsent, onToken, onPrint, onComplete, onDelete, onAttach, attachmentBusy, onDownloadAttachment, onDownloadCertificate }) {
   const meta = getStatusMeta(item.status);
 
   return (
@@ -446,6 +545,14 @@ function BaptismRow({ item, isLoading, onVerify, onConsent, onToken, onComplete,
         <div style={styles.muted}>
           Father: {display(item.fatherName)} | Mother: {display(item.motherName)}
         </div>
+        {item.signedCertificates?.map((attachment) => (
+          <div key={attachment.id} style={{ marginTop: 8 }}>
+            <button type="button" style={{ ...styles.pdfButton, maxWidth: 260, overflowWrap: "anywhere", textAlign: "left" }}
+              onClick={() => onDownloadAttachment(item.id, attachment)} title="Download signed certificate">
+              Signed: {attachment.filename}
+            </button>
+          </div>
+        ))}
       </td>
 
       <td style={styles.td}>
@@ -476,6 +583,10 @@ function BaptismRow({ item, isLoading, onVerify, onConsent, onToken, onComplete,
 
       <td style={{ ...styles.td, textAlign: "right" }}>
         <div style={styles.actionGroup}>
+          <button type="button" onClick={onAttach} disabled={isLoading || attachmentBusy}
+            style={styles.actionButton("#6d28d9")}>
+            Attach Signed Certificate
+          </button>
           {!item.churchVerified && (
             <button
               type="button"
@@ -520,15 +631,16 @@ function BaptismRow({ item, isLoading, onVerify, onConsent, onToken, onComplete,
             </button>
           )}
 
+          {item.token && (
+            <button type="button" onClick={() => onPrint(item)} style={styles.actionButton("#7c3aed")}>
+              Print Token
+            </button>
+          )}
+
           {item.certificatePdfUrl && (
-            <a
-              href={`${API_BASE}/${item.id}/certificate`}
-              target="_blank"
-              rel="noreferrer"
-              style={styles.pdfButton}
-            >
+            <button type="button" onClick={() => onDownloadCertificate(item.id)} style={styles.pdfButton}>
               PDF
-            </a>
+            </button>
           )}
 
           <button

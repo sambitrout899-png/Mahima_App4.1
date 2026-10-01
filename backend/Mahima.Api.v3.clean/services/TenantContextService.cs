@@ -24,9 +24,12 @@ namespace Mahima.Api.v3.clean.Services
         public async Task<Tenant?> GetCurrentTenantAsync(CancellationToken ct = default)
         {
             var http = _httpContextAccessor.HttpContext;
-            var tenantIdText =
-                http?.User?.FindFirst("tenant_id")?.Value ??
-                http?.Request?.Headers["X-Tenant-Id"].FirstOrDefault();
+            var headerTenantIdText = http?.Request?.Headers["X-Tenant-Id"].FirstOrDefault();
+            var claimTenantIdText = http?.User?.FindFirst("tenant_id")?.Value;
+            var canUseTenantOverride = await CanUseTenantOverrideAsync(http?.User, claimTenantIdText, ct);
+            var tenantIdText = canUseTenantOverride && !string.IsNullOrWhiteSpace(headerTenantIdText)
+                ? headerTenantIdText
+                : claimTenantIdText ?? headerTenantIdText;
 
             if (Guid.TryParse(tenantIdText, out var tenantId))
             {
@@ -62,6 +65,24 @@ namespace Mahima.Api.v3.clean.Services
             }
 
             return await GetOrCreateRootTenantAsync(ct);
+        }
+
+        private async Task<bool> CanUseTenantOverrideAsync(ClaimsPrincipal? user, string? claimTenantIdText, CancellationToken ct)
+        {
+            if (user?.Identity?.IsAuthenticated != true) return false;
+
+            var hasAdminRole = user.Claims
+                .Where(c => c.Type == ClaimTypes.Role || c.Type == "role" || c.Type == "roles")
+                .Select(c => c.Value)
+                .Any(v => string.Equals(v, "admin", StringComparison.OrdinalIgnoreCase));
+            if (!hasAdminRole) return false;
+
+            if (Guid.TryParse(claimTenantIdText, out var tenantId))
+            {
+                return await _db.Tenants.AnyAsync(t => t.Id == tenantId && t.IsRootTenant, ct);
+            }
+
+            return false;
         }
 
         public async Task<Tenant> GetOrCreateRootTenantAsync(CancellationToken ct = default)

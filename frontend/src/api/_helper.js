@@ -31,7 +31,7 @@ function getApiBase() {
       if (isNative) {
         base =
           import.meta.env.VITE_MOBILE_API_BASE ||
-          "https://mahimaministries.in/api";
+          "https://beta.mahimaministries.in/api";
       }
     }
   } catch {}

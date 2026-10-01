@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { API_BASE } from '../config';
+import { tenantLoginHref } from '../utils/tenantNavigation';
 
 const api = axios.create({ baseURL: API_BASE });
 
@@ -17,7 +18,7 @@ api.interceptors.response.use(
     if (err.response?.status === 401) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      window.location.href = '/login';
+      window.location.href = tenantLoginHref();
     }
     return Promise.reject(err);
   }

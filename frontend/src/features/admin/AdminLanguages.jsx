@@ -17,6 +17,11 @@ export default function AdminLanguages() {
   const [error, setError]   = useState("");
   const [busy, setBusy]     = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState(null);
+
+  function notifyPicker() {
+    window.dispatchEvent(new CustomEvent("mahima:languages-updated"));
+  }
 
   async function refresh() {
     setLoad(true);
@@ -39,6 +44,7 @@ export default function AdminLanguages() {
     try {
       await updateLanguage(row.code, { enabled: !row.enabled });
       await refresh();
+      notifyPicker();
     } catch (e) {
       alert("Update failed: " + (e?.response?.data || e?.message));
     } finally { setBusy(false); }
@@ -50,6 +56,7 @@ export default function AdminLanguages() {
     try {
       await updateLanguage(row.code, { isDefault: true });
       await refresh();
+      notifyPicker();
     } catch (e) {
       alert("Update failed: " + (e?.response?.data || e?.message));
     } finally { setBusy(false); }
@@ -69,6 +76,7 @@ export default function AdminLanguages() {
     try {
       await reorderLanguages(payload);
       await refresh();
+      notifyPicker();
     } catch (e) {
       alert("Reorder failed: " + (e?.response?.data || e?.message));
     } finally { setBusy(false); }
@@ -84,6 +92,7 @@ export default function AdminLanguages() {
     try {
       await deleteLanguage(row.code);
       await refresh();
+      notifyPicker();
     } catch (e) {
       alert("Delete failed: " + (e?.response?.data || e?.message));
     } finally { setBusy(false); }
@@ -158,6 +167,11 @@ export default function AdminLanguages() {
                 <td className="p-2 border text-center">{row.rtl ? "Yes" : "No"}</td>
                 <td className="p-2 border text-right">
                   <button
+                    className="px-2 py-1 text-blue-700 hover:underline disabled:text-gray-400"
+                    onClick={() => setEditing(row)}
+                    disabled={busy}
+                  >Edit</button>
+                  <button
                     className="px-2 py-1 text-red-600 hover:underline disabled:text-gray-400"
                     onClick={() => removeRow(row)}
                     disabled={busy || row.isDefault}
@@ -181,9 +195,57 @@ export default function AdminLanguages() {
         <AddLanguageModal
           existingCodes={items.map((i) => i.code)}
           onClose={() => setShowAdd(false)}
-          onSaved={async () => { setShowAdd(false); await refresh(); }}
+          onSaved={async () => { setShowAdd(false); await refresh(); notifyPicker(); }}
         />
       )}
+      {editing && (
+        <EditLanguageModal
+          language={editing}
+          onClose={() => setEditing(null)}
+          onSaved={async () => { setEditing(null); await refresh(); notifyPicker(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditLanguageModal({ language, onClose, onSaved }) {
+  const [name, setName] = useState(language.name || "");
+  const [nativeName, setNativeName] = useState(language.nativeName || "");
+  const [rtl, setRtl] = useState(Boolean(language.rtl));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function save() {
+    if (!name.trim() || !nativeName.trim()) { setError("Name and native name are required."); return; }
+    setSaving(true);
+    setError("");
+    try {
+      await updateLanguage(language.code, { name: name.trim(), nativeName: nativeName.trim(), rtl });
+      await onSaved();
+    } catch (e) {
+      setError(String(e?.response?.data?.message || e?.response?.data || e?.message || e));
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+      <div className="bg-white rounded shadow-lg max-w-md w-full p-6 space-y-4" role="dialog" aria-modal="true">
+        <h2 className="text-xl font-semibold">Edit Language</h2>
+        <p className="text-sm text-gray-500">Code: <span className="font-mono">{language.code}</span></p>
+        <label className="block"><span className="text-sm text-gray-600">English name</span>
+          <input className="mt-1 w-full border rounded px-2 py-1" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />
+        </label>
+        <label className="block"><span className="text-sm text-gray-600">Native name</span>
+          <input className="mt-1 w-full border rounded px-2 py-1" value={nativeName} onChange={(e) => setNativeName(e.target.value)} maxLength={80} />
+        </label>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={rtl} onChange={(e) => setRtl(e.target.checked)} /> Right-to-left layout</label>
+        {error && <div className="text-red-600 text-sm">{error}</div>}
+        <div className="flex justify-end gap-2">
+          <button className="px-3 py-1 border rounded" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="px-3 py-1 bg-blue-600 text-white rounded" onClick={save} disabled={saving}>{saving ? "Saving..." : "Save changes"}</button>
+        </div>
+      </div>
     </div>
   );
 }

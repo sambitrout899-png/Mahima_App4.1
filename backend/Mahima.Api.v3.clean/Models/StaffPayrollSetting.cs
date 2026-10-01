@@ -24,5 +24,7 @@ namespace Mahima.Api.v3.clean.Models
 
 	public decimal ExpectedMonthlyHours { get; set; } // e.g. 40
 	public string SalaryType { get; set; } = "Fixed"; // "Fixed" or "Hourly"
+        // System.DayOfWeek value (0 = Sunday ... 6 = Saturday).
+        public int WeeklyOffDay { get; set; } = 0;
     }
 }

@@ -1,5 +1,7 @@
 // File: Helpers/SmsHelper.cs
 using System;
+using System.Collections.Generic;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -10,6 +12,8 @@ using Twilio.Types;
 
 namespace Mahima.Api.v3.clean.Helpers
 {
+    public sealed record SmsSendResult(bool Success, string? MessageSid, string? ErrorMessage);
+
     /// <summary>
     /// Static facade preserving the previous static API (Initialize, SendSmsAsync, SendWhatsappAsync).
     /// Internally holds an instance-based implementation to make later DI refactors straightforward.
@@ -79,10 +83,22 @@ namespace Mahima.Api.v3.clean.Helpers
             return _instance!.SendSmsAsync(toPhone, body, logger);
         }
 
-        public static Task<(bool Success, string? ErrorMessage)> SendWhatsappAsync(string toPhone, string body, ILogger? logger = null)
+        public static Task<(bool Success, string? ErrorMessage)> SendWhatsappAsync(string toPhone, string body, ILogger? logger = null, string? statusCallbackUrl = null)
         {
             EnsureInstance();
-            return _instance!.SendWhatsappAsync(toPhone, body, logger);
+            return _instance!.SendWhatsappAsync(toPhone, body, logger, statusCallbackUrl);
+        }
+
+        public static Task<SmsSendResult> SendSmsDetailedAsync(string toPhone, string body, ILogger? logger = null)
+        {
+            EnsureInstance();
+            return _instance!.SendSmsDetailedAsync(toPhone, body, logger);
+        }
+
+        public static Task<SmsSendResult> SendWhatsAppTemplateAsync(string toPhone, string contentSid, IDictionary<string, string> contentVariables, string? statusCallbackUrl = null, ILogger? logger = null)
+        {
+            EnsureInstance();
+            return _instance!.SendWhatsAppTemplateAsync(toPhone, contentSid, contentVariables, statusCallbackUrl, logger);
         }
 
         private static void EnsureInstance()
@@ -103,7 +119,8 @@ namespace Mahima.Api.v3.clean.Helpers
             private readonly ILogger? _logger;
             private readonly string? _accountSid;
             private readonly string? _authToken;
-            private readonly string? _fromNumber;             // used for SMS and WhatsApp (raw E.164)
+            private readonly string? _smsFromNumber;
+            private readonly string? _whatsAppFrom;
             private readonly string? _messagingServiceSid;
 
             // constructor used when IConfiguration provided or when Initialize(null) is used
@@ -112,16 +129,13 @@ namespace Mahima.Api.v3.clean.Helpers
                 _configuration = configuration;
                 _logger = logger;
 
-                _accountSid = GetConfig("Twilio:AccountSid") ?? GetConfig("TWILIO_ACCOUNT_SID");
-                _authToken = GetConfig("Twilio:AuthToken") ?? GetConfig("TWILIO_AUTH_TOKEN");
-
-                // Accept both Twilio:FromNumber and Twilio:WhatsAppFrom/env names
-                _fromNumber = GetConfig("Twilio:FromNumber")
-                              ?? GetConfig("TWILIO_FROM_NUMBER")
-                              ?? GetConfig("Twilio:WhatsAppFrom")
-                              ?? GetConfig("TWILIO_WHATSAPP_FROM");
-
-                _messagingServiceSid = GetConfig("Twilio:MessagingServiceSid") ?? GetConfig("TWILIO_MESSAGING_SERVICE_SID");
+                // Environment variables take precedence so production credentials never need
+                // to be committed to appsettings.json.
+                _accountSid = GetSetting("Twilio:AccountSid", "TWILIO_ACCOUNT_SID");
+                _authToken = GetSetting("Twilio:AuthToken", "TWILIO_AUTH_TOKEN");
+                _smsFromNumber = GetSetting("Twilio:FromNumber", "TWILIO_FROM_NUMBER");
+                _whatsAppFrom = GetSetting("Twilio:WhatsAppFrom", "TWILIO_WHATSAPP_FROM");
+                _messagingServiceSid = GetSetting("Twilio:MessagingServiceSid", "TWILIO_MESSAGING_SERVICE_SID");
 
                 if (!string.IsNullOrWhiteSpace(_accountSid) && !string.IsNullOrWhiteSpace(_authToken))
                 {
@@ -148,7 +162,8 @@ namespace Mahima.Api.v3.clean.Helpers
 
                 _accountSid = accountSid;
                 _authToken = authToken;
-                _fromNumber = fromNumber;
+                _smsFromNumber = fromNumber;
+                _whatsAppFrom = fromNumber;
                 _messagingServiceSid = messagingServiceSid;
 
                 if (!string.IsNullOrWhiteSpace(_accountSid) && !string.IsNullOrWhiteSpace(_authToken))
@@ -168,9 +183,12 @@ namespace Mahima.Api.v3.clean.Helpers
                 }
             }
 
-            private string? GetConfig(string key)
+            private string? GetSetting(string configurationKey, string environmentKey)
             {
-                return _configuration?[key] ?? Environment.GetEnvironmentVariable(key);
+                var environmentValue = Environment.GetEnvironmentVariable(environmentKey);
+                return !string.IsNullOrWhiteSpace(environmentValue)
+                    ? environmentValue
+                    : _configuration?[configurationKey];
             }
 
             // helper: normalize E.164 for SMS (strip any whatsapp: prefix)
@@ -225,7 +243,7 @@ namespace Mahima.Api.v3.clean.Helpers
 
                     // Ensure the phone passed to SMS is plain E.164 (no whatsapp: prefix)
                     var toE164 = NormalizeE164(toPhone);
-                    var fromE164 = !string.IsNullOrWhiteSpace(_fromNumber) ? NormalizeE164(_fromNumber) : null;
+                    var fromE164 = !string.IsNullOrWhiteSpace(_smsFromNumber) ? NormalizeE164(_smsFromNumber) : null;
 
                     log?.LogInformation("Sending SMS -> To: {To}, From: {From}, Using MessagingService: {Ms}", toE164, fromE164, _messagingServiceSid);
 
@@ -270,7 +288,7 @@ namespace Mahima.Api.v3.clean.Helpers
                 }
             }
 
-            public async Task<(bool Success, string? ErrorMessage)> SendWhatsappAsync(string toPhone, string body, ILogger? logger = null)
+            public async Task<(bool Success, string? ErrorMessage)> SendWhatsappAsync(string toPhone, string body, ILogger? logger = null, string? statusCallbackUrl = null)
             {
                 var log = logger ?? _logger;
                 try
@@ -291,7 +309,7 @@ namespace Mahima.Api.v3.clean.Helpers
 
                     var toWhats = NormalizeWhatsAppNumber(toPhone);
                     string? fromWhats = null;
-                    if (!string.IsNullOrWhiteSpace(_fromNumber)) fromWhats = NormalizeWhatsAppNumber(_fromNumber);
+                    if (!string.IsNullOrWhiteSpace(_whatsAppFrom)) fromWhats = NormalizeWhatsAppNumber(_whatsAppFrom);
 
                     log?.LogInformation("Sending WhatsApp -> To: {To}, From: {From}, Using MessagingService: {Ms}", toWhats, fromWhats, _messagingServiceSid);
 
@@ -302,13 +320,15 @@ namespace Mahima.Api.v3.clean.Helpers
                     }
 
                     MessageResource? message = null;
+                    Uri? statusCallback = Uri.TryCreate(statusCallbackUrl, UriKind.Absolute, out var scUri) ? scUri : null;
 
                     if (!string.IsNullOrWhiteSpace(_messagingServiceSid))
                     {
                         message = await MessageResource.CreateAsync(
                             to: new PhoneNumber(toWhats),
                             messagingServiceSid: _messagingServiceSid,
-                            body: body
+                            body: body,
+                            statusCallback: statusCallback
                         );
                     }
                     else if (!string.IsNullOrWhiteSpace(fromWhats))
@@ -316,7 +336,8 @@ namespace Mahima.Api.v3.clean.Helpers
                         message = await MessageResource.CreateAsync(
                             to: new PhoneNumber(toWhats),
                             from: new PhoneNumber(fromWhats),
-                            body: body
+                            body: body,
+                            statusCallback: statusCallback
                         );
                     }
                     else
@@ -338,6 +359,75 @@ namespace Mahima.Api.v3.clean.Helpers
                 {
                     log?.LogError(ex, "Unexpected error sending WhatsApp");
                     return (false, ex.Message);
+                }
+            }
+
+            public async Task<SmsSendResult> SendSmsDetailedAsync(string toPhone, string body, ILogger? logger = null)
+            {
+                var log = logger ?? _logger;
+                if (string.IsNullOrWhiteSpace(_accountSid) || string.IsNullOrWhiteSpace(_authToken))
+                    return new SmsSendResult(false, null, "Twilio credentials missing (TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN).");
+                if (string.IsNullOrWhiteSpace(toPhone))
+                    return new SmsSendResult(false, null, "Destination phone number is empty.");
+                try
+                {
+                    var to = new PhoneNumber(NormalizeE164(toPhone));
+                    var fromE164 = !string.IsNullOrWhiteSpace(_smsFromNumber) ? NormalizeE164(_smsFromNumber) : null;
+                    MessageResource message = !string.IsNullOrWhiteSpace(_messagingServiceSid)
+                        ? await MessageResource.CreateAsync(to: to, messagingServiceSid: _messagingServiceSid, body: body)
+                        : !string.IsNullOrWhiteSpace(fromE164)
+                            ? await MessageResource.CreateAsync(to: to, from: new PhoneNumber(fromE164), body: body)
+                            : throw new InvalidOperationException("No SMS sender configured. Set TWILIO_FROM_NUMBER or TWILIO_MESSAGING_SERVICE_SID.");
+                    log?.LogInformation("SMS sent. SID: {Sid}", message.Sid);
+                    return new SmsSendResult(true, message.Sid, null);
+                }
+                catch (ApiException aex)
+                {
+                    log?.LogError(aex, "Twilio API Exception (SMS): Code={Code}, Message={Message}", aex.Code, aex.Message);
+                    return new SmsSendResult(false, null, $"Twilio API error: {aex.Message}");
+                }
+                catch (Exception ex)
+                {
+                    log?.LogError(ex, "Unexpected error sending SMS");
+                    return new SmsSendResult(false, null, ex.Message);
+                }
+            }
+
+            // Cold, business-initiated WhatsApp outreach requires a pre-approved Twilio/Meta
+            // Content Template (contentSid + positional contentVariables). Free-form body text
+            // is only permitted inside WhatsApp's 24-hour customer-initiated session window.
+            public async Task<SmsSendResult> SendWhatsAppTemplateAsync(string toPhone, string contentSid, IDictionary<string, string> contentVariables, string? statusCallbackUrl = null, ILogger? logger = null)
+            {
+                var log = logger ?? _logger;
+                if (string.IsNullOrWhiteSpace(_accountSid) || string.IsNullOrWhiteSpace(_authToken))
+                    return new SmsSendResult(false, null, "Twilio credentials missing (TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN).");
+                if (string.IsNullOrWhiteSpace(toPhone))
+                    return new SmsSendResult(false, null, "Destination phone number is empty.");
+                if (string.IsNullOrWhiteSpace(contentSid))
+                    return new SmsSendResult(false, null, "No approved WhatsApp Content Template SID is configured for this campaign.");
+                try
+                {
+                    var to = new PhoneNumber(NormalizeWhatsAppNumber(toPhone));
+                    var fromWhats = !string.IsNullOrWhiteSpace(_whatsAppFrom) ? NormalizeWhatsAppNumber(_whatsAppFrom) : null;
+                    var variablesJson = JsonSerializer.Serialize(contentVariables ?? new Dictionary<string, string>());
+                    Uri? statusCallback = Uri.TryCreate(statusCallbackUrl, UriKind.Absolute, out var scUri) ? scUri : null;
+                    MessageResource? message = !string.IsNullOrWhiteSpace(_messagingServiceSid)
+                        ? await MessageResource.CreateAsync(to: to, messagingServiceSid: _messagingServiceSid, contentSid: contentSid, contentVariables: variablesJson, statusCallback: statusCallback)
+                        : !string.IsNullOrWhiteSpace(fromWhats)
+                            ? await MessageResource.CreateAsync(to: to, from: new PhoneNumber(fromWhats), contentSid: contentSid, contentVariables: variablesJson, statusCallback: statusCallback)
+                            : throw new InvalidOperationException("No WhatsApp sender configured. Set TWILIO_WHATSAPP_FROM or TWILIO_MESSAGING_SERVICE_SID.");
+                    log?.LogInformation("WhatsApp template message sent. SID: {Sid}", message?.Sid);
+                    return new SmsSendResult(true, message?.Sid, null);
+                }
+                catch (ApiException aex)
+                {
+                    log?.LogError(aex, "Twilio API Exception (WhatsApp template): Code={Code}, Message={Message}, MoreInfo={MoreInfo}", aex.Code, aex.Message, aex.MoreInfo);
+                    return new SmsSendResult(false, null, $"Twilio API error: {aex.Message}");
+                }
+                catch (Exception ex)
+                {
+                    log?.LogError(ex, "Unexpected error sending WhatsApp template message");
+                    return new SmsSendResult(false, null, ex.Message);
                 }
             }
         }

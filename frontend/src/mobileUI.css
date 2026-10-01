@@ -398,3 +398,175 @@ header [class*="pill"], header [class*="badge"]{ min-width: auto; max-width: 100
     max-width: calc(100vw - 28px) !important;
   }
 }
+
+/* =================== Android app experience =================== */
+@media (max-width: 767px) {
+  .mahima-native-shell {
+    --native-green: #087f5b;
+    --native-green-dark: #065f46;
+    --native-ink: #14221d;
+    --native-muted: #66736e;
+    --native-surface: #f4f7f5;
+    min-height: 100dvh;
+    background: var(--native-surface);
+    color: var(--native-ink);
+  }
+
+  .mahima-native-shell .mahima-native-topbar {
+    flex-wrap: nowrap;
+    gap: 8px;
+    border-bottom: 0;
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 1px 0 rgba(15, 23, 42, 0.07), 0 8px 24px rgba(15, 23, 42, 0.04);
+    backdrop-filter: blur(18px);
+  }
+
+  .mahima-native-shell .mahima-native-topbar > a,
+  .mahima-native-shell .mahima-native-topbar .mahima-topbar-actions,
+  .mahima-native-shell .mahima-native-topbar .mahima-topbar-spacer,
+  .mahima-native-shell .mahima-native-topbar .mahima-user-info,
+  .mahima-native-shell .mahima-native-topbar .mahima-user-chevron {
+    display: none !important;
+  }
+
+  .mahima-native-shell .mahima-native-topbar > button:first-of-type,
+  .mahima-native-shell .mahima-native-topbar .mahima-user-button {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    padding: 0;
+    border-radius: 14px;
+    background: #eef5f1;
+  }
+
+  .mahima-native-shell .mahima-user-menu { margin-left: auto; }
+
+  .mahima-native-title {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    line-height: 1.15;
+  }
+
+  .mahima-native-title span {
+    overflow: hidden;
+    color: var(--native-ink);
+    font-size: 16px;
+    font-weight: 800;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mahima-native-title small {
+    margin-top: 3px;
+    overflow: hidden;
+    color: var(--native-muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mahima-native-shell .mahima-user-dropdown {
+    position: fixed;
+    top: calc(3.75rem + env(safe-area-inset-top));
+    right: 10px;
+    width: min(19rem, calc(100vw - 20px));
+    border-radius: 20px;
+  }
+
+  .mahima-native-shell .mahima-page-host {
+    background: var(--native-surface);
+    padding-bottom: calc(5.25rem + env(safe-area-inset-bottom)) !important;
+  }
+
+  .mahima-native-shell .mahima-page-frame:not(.mahima-page-frame-full) {
+    width: 100%;
+    padding: 12px;
+  }
+
+  .mahima-native-bottom-nav {
+    position: fixed;
+    z-index: 130;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    min-height: calc(4.5rem + env(safe-area-inset-bottom));
+    padding: 7px max(6px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(6px, env(safe-area-inset-left));
+    border-top: 1px solid rgba(15, 23, 42, 0.07);
+    background: rgba(255, 255, 255, 0.97);
+    box-shadow: 0 -10px 30px rgba(15, 23, 42, 0.07);
+    backdrop-filter: blur(20px);
+  }
+
+  .mahima-native-tab {
+    display: flex !important;
+    min-width: 0 !important;
+    min-height: 58px;
+    flex-direction: column;
+    gap: 3px;
+    padding: 4px 2px !important;
+    border-radius: 14px;
+    color: #6b7772;
+    font-size: 10px !important;
+    font-weight: 750;
+  }
+
+  .mahima-native-tab-icon {
+    display: grid;
+    width: 42px;
+    height: 28px;
+    place-items: center;
+    border-radius: 999px;
+    transition: background .18s ease, color .18s ease;
+  }
+
+  .mahima-native-tab-icon svg { width: 20px; height: 20px; }
+  .mahima-native-tab.is-active { color: var(--native-green-dark); }
+  .mahima-native-tab.is-active .mahima-native-tab-icon { background: #d9f2e7; }
+
+  .mahima-native-shell main h1 {
+    font-size: clamp(24px, 7.5vw, 32px) !important;
+    line-height: 1.12 !important;
+    letter-spacing: -.025em;
+  }
+
+  .mahima-native-shell main h2 { font-size: clamp(20px, 6vw, 26px) !important; }
+
+  .mahima-native-shell main :is(button, a.btn, a.button, [role="button"]) {
+    min-height: 44px;
+    border-radius: 13px;
+  }
+
+  .mahima-native-shell main :is(input, select, textarea) {
+    min-height: 48px;
+    border-radius: 13px !important;
+  }
+
+  .mahima-native-shell main :is(.card, .panel, [class*="rounded-xl"], [class*="rounded-2xl"]) {
+    border-radius: 18px;
+  }
+
+  .mahima-native-shell main table { min-width: 680px !important; }
+
+  .mahima-native-shell main :is(.overflow-x-auto, [class*="overflow-x-auto"]) {
+    border-radius: 16px;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .mahima-native-shell [role="dialog"] > aside {
+    border-radius: 0 24px 24px 0;
+  }
+
+  .mahima-native-shell [role="dialog"] nav a {
+    min-height: 52px;
+    border-radius: 14px;
+  }
+}

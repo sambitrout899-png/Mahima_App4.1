@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Mahima.Api.v3.clean.Services;
+using System.Text.RegularExpressions;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -26,11 +28,14 @@ namespace Mahima.Api.v3.clean.Controllers
     {
         private readonly MahimaDbContext _db;
         private readonly ILogger<AdminLanguagesController> _logger;
+        private readonly ITenantContextService _tenantContext;
+        private static readonly Regex ValidCode = new("^[a-z]{2,3}(?:-[a-z0-9]{2,4})?$", RegexOptions.Compiled);
 
-        public AdminLanguagesController(MahimaDbContext db, ILogger<AdminLanguagesController> logger)
+        public AdminLanguagesController(MahimaDbContext db, ILogger<AdminLanguagesController> logger, ITenantContextService tenantContext)
         {
             _db = db;
             _logger = logger;
+            _tenantContext = tenantContext;
         }
 
         // -----------------------------------------------------------------
@@ -57,6 +62,7 @@ namespace Mahima.Api.v3.clean.Controllers
         [HttpGet("/api/admin/languages")]
         public async Task<IActionResult> ListAll()
         {
+            if (!await IsRootAdminAsync()) return Forbid();
             var items = await _db.AppLanguages
                 .AsNoTracking()
                 .OrderBy(l => l.DisplayOrder)
@@ -73,18 +79,22 @@ namespace Mahima.Api.v3.clean.Controllers
         [HttpPost("/api/admin/languages")]
         public async Task<IActionResult> Create([FromBody] CreateAppLanguageDto dto)
         {
+            if (!await IsRootAdminAsync()) return Forbid();
             if (dto == null) return BadRequest("Payload required.");
             var code = (dto.Code ?? string.Empty).Trim().ToLowerInvariant();
-            if (string.IsNullOrWhiteSpace(code)) return BadRequest("Code is required.");
+            if (!ValidCode.IsMatch(code)) return BadRequest("Use a valid ISO language code such as en, hi, or pt-br.");
             if (string.IsNullOrWhiteSpace(dto.Name)) return BadRequest("Name is required.");
             if (string.IsNullOrWhiteSpace(dto.NativeName)) return BadRequest("Native name is required.");
 
             if (await _db.AppLanguages.AnyAsync(l => l.Code == code))
                 return Conflict($"Language '{code}' already exists.");
 
-            // If this is set as default, clear other defaults first
-            if (dto.IsDefault)
-                await ClearDefaults();
+            var mustBeDefault = dto.IsDefault || !await _db.AppLanguages.AnyAsync();
+            if (mustBeDefault && !dto.Enabled)
+                return BadRequest("The default language must be enabled.");
+
+            await using var transaction = await _db.Database.BeginTransactionAsync();
+            if (mustBeDefault) await ClearDefaults();
 
             var entity = new AppLanguage
             {
@@ -92,7 +102,7 @@ namespace Mahima.Api.v3.clean.Controllers
                 Name         = dto.Name.Trim(),
                 NativeName   = dto.NativeName.Trim(),
                 Enabled      = dto.Enabled,
-                IsDefault    = dto.IsDefault,
+                IsDefault    = mustBeDefault,
                 DisplayOrder = dto.DisplayOrder,
                 Rtl          = dto.Rtl,
                 CreatedAt    = DateTime.UtcNow,
@@ -100,6 +110,7 @@ namespace Mahima.Api.v3.clean.Controllers
             };
             _db.AppLanguages.Add(entity);
             await _db.SaveChangesAsync();
+            await transaction.CommitAsync();
 
             _logger.LogInformation("Admin created language {Code} ({Name})", entity.Code, entity.Name);
             return CreatedAtAction(nameof(ListAll), new { code = entity.Code }, Map(entity));
@@ -112,14 +123,15 @@ namespace Mahima.Api.v3.clean.Controllers
         [HttpPut("/api/admin/languages/{code}")]
         public async Task<IActionResult> Update(string code, [FromBody] UpdateAppLanguageDto dto)
         {
+            if (!await IsRootAdminAsync()) return Forbid();
             if (dto == null) return BadRequest("Payload required.");
             code = (code ?? string.Empty).Trim().ToLowerInvariant();
 
             var entity = await _db.AppLanguages.FirstOrDefaultAsync(l => l.Code == code);
             if (entity == null) return NotFound();
 
-            if (dto.IsDefault == true && !entity.IsDefault)
-                await ClearDefaults();
+            await using var transaction = await _db.Database.BeginTransactionAsync();
+            if (dto.IsDefault == true && !entity.IsDefault) await ClearDefaults();
 
             if (dto.Name         != null) entity.Name         = dto.Name.Trim();
             if (dto.NativeName   != null) entity.NativeName   = dto.NativeName.Trim();
@@ -142,6 +154,7 @@ namespace Mahima.Api.v3.clean.Controllers
             }
 
             await _db.SaveChangesAsync();
+            await transaction.CommitAsync();
             return Ok(Map(entity));
         }
 
@@ -152,6 +165,7 @@ namespace Mahima.Api.v3.clean.Controllers
         [HttpDelete("/api/admin/languages/{code}")]
         public async Task<IActionResult> Delete(string code)
         {
+            if (!await IsRootAdminAsync()) return Forbid();
             code = (code ?? string.Empty).Trim().ToLowerInvariant();
             var entity = await _db.AppLanguages.FirstOrDefaultAsync(l => l.Code == code);
             if (entity == null) return NotFound();
@@ -170,6 +184,7 @@ namespace Mahima.Api.v3.clean.Controllers
         [HttpPut("/api/admin/languages/reorder")]
         public async Task<IActionResult> Reorder([FromBody] List<ReorderItem> items)
         {
+            if (!await IsRootAdminAsync()) return Forbid();
             if (items == null || items.Count == 0) return BadRequest("Empty payload.");
             var codes = items.Select(i => i.Code.Trim().ToLowerInvariant()).ToList();
             var entities = await _db.AppLanguages.Where(l => codes.Contains(l.Code)).ToListAsync();
@@ -191,6 +206,12 @@ namespace Mahima.Api.v3.clean.Controllers
         {
             var defaults = await _db.AppLanguages.Where(l => l.IsDefault).ToListAsync();
             foreach (var d in defaults) d.IsDefault = false;
+        }
+
+        private async Task<bool> IsRootAdminAsync()
+        {
+            var tenant = await _tenantContext.GetCurrentTenantAsync(HttpContext.RequestAborted);
+            return tenant?.IsRootTenant == true;
         }
 
         private static AppLanguageDto Map(AppLanguage l) => new AppLanguageDto

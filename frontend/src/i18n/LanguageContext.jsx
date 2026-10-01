@@ -1,5 +1,6 @@
 ﻿import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { listEnabledLanguages } from "../api/languagesApi";
+import { getMyPreferredLanguage, listEnabledLanguages, updateMyPreferredLanguage } from "../api/languagesApi";
+import { getToken } from "../features/auth/authService";
 import { apiFetch } from "../utils/fetch-auth-shim";
 
 export const REQUIRED_UI_LANGUAGES = [
@@ -1561,12 +1562,12 @@ const BUILT_IN_LANGUAGE_BY_CODE = new Map(
 );
 
 function looksLikeMojibake(value) {
-  return /[ÃÂ�]|à[¤¥¦§¨©ª«¬®¯]/.test(String(value || ""));
+  return /[ÃÂ\uFFFD]|à[¤¥¦§¨©ª«¬®¯]/.test(String(value || ""));
 }
 
-function mergeLanguages(apiLanguages = []) {
+function mergeLanguages(apiLanguages = [], includeFallback = false) {
   const map = new Map();
-  REQUIRED_UI_LANGUAGES.forEach((language) => map.set(language.code, { ...language }));
+  if (includeFallback) REQUIRED_UI_LANGUAGES.forEach((language) => map.set(language.code, { ...language }));
   (Array.isArray(apiLanguages) ? apiLanguages : []).forEach((language) => {
     if (!language?.code) return;
     const code = String(language.code).trim().toLowerCase();
@@ -1846,10 +1847,12 @@ async function translateTree(root, phraseMap, lang) {
   });
 }
 
-function GlobalTextTranslator({ lang }) {
+function GlobalTextTranslator({ lang, rtl }) {
   useEffect(() => {
     const phraseMap = buildPhraseMap(lang);
     document.documentElement.lang = lang || "en";
+    document.documentElement.dir = rtl ? "rtl" : "ltr";
+    document.body?.classList.toggle("mahima-rtl", Boolean(rtl));
     if (!lang || lang === "en") return undefined;
 
     let timer = 0;
@@ -1872,7 +1875,7 @@ function GlobalTextTranslator({ lang }) {
       window.clearTimeout(timer);
       observer.disconnect();
     };
-  }, [lang]);
+  }, [lang, rtl]);
 
   return null;
 }
@@ -1899,7 +1902,10 @@ export function LanguageProvider({ children }) {
   const [languages, setLanguages] = useState(() => {
     try {
       const cached = localStorage.getItem("mahima_languages");
-      if (cached) return mergeLanguages(JSON.parse(cached));
+      if (cached) {
+        const configured = mergeLanguages(JSON.parse(cached));
+        if (configured.length) return configured;
+      }
     } catch {}
     return REQUIRED_UI_LANGUAGES;
   });
@@ -1908,16 +1914,35 @@ export function LanguageProvider({ children }) {
     try {
       const list = await listEnabledLanguages();
       const next = mergeLanguages(list);
+      if (!next.length) throw new Error("No enabled languages are configured.");
       setLanguages(next);
       try { localStorage.setItem("mahima_languages", JSON.stringify(next)); } catch {}
     } catch (e) {
       console.warn("Languages API unreachable, using fallback list.", e?.message || e);
-      setLanguages((current) => mergeLanguages(current));
+      setLanguages((current) => current.length ? current : REQUIRED_UI_LANGUAGES);
     }
   }
 
+  const loadAuthenticatedPreference = () => {
+    if (!getToken()) return;
+    getMyPreferredLanguage()
+      .then((saved) => { if (saved) setLangState(saved.toLowerCase()); })
+      .catch(() => {});
+  };
+
   useEffect(() => {
     refreshLanguages();
+    loadAuthenticatedPreference();
+    const handleLanguagesUpdated = () => refreshLanguages();
+    const handleAuthChanged = (event) => {
+      if (event?.detail?.token || getToken()) loadAuthenticatedPreference();
+    };
+    window.addEventListener("mahima:languages-updated", handleLanguagesUpdated);
+    window.addEventListener("auth:change", handleAuthChanged);
+    return () => {
+      window.removeEventListener("mahima:languages-updated", handleLanguagesUpdated);
+      window.removeEventListener("auth:change", handleAuthChanged);
+    };
   }, []);
 
   const defaultLang = useMemo(
@@ -1934,10 +1959,14 @@ export function LanguageProvider({ children }) {
   }, [defaultLang, lang, languages]);
 
   const setLang = (value) => {
-    const next = value || "en";
+    const next = String(value || defaultLang).toLowerCase();
+    if (!languages.some((language) => language.code === next)) return;
     const previous = lang;
     setLangState(next);
     try { localStorage.setItem("mahima_lang", next); } catch {}
+    // Public pages also use this provider. Persist locally for anonymous visitors,
+    // and call the protected preference endpoint only after authentication.
+    if (getToken()) updateMyPreferredLanguage(next).catch(() => {});
     window.dispatchEvent(new CustomEvent("mahima:language-change", { detail: { lang: next } }));
     if (next === "en" && previous && previous !== "en") {
       window.setTimeout(() => window.location.reload(), 60);
@@ -1957,9 +1986,11 @@ export function LanguageProvider({ children }) {
     };
   }, [defaultLang, lang, languages]);
 
+  const activeLanguage = languages.find((language) => language.code === lang);
+
   return (
     <LanguageContext.Provider value={value}>
-      <GlobalTextTranslator lang={lang} />
+      <GlobalTextTranslator lang={lang} rtl={Boolean(activeLanguage?.rtl)} />
       {children}
     </LanguageContext.Provider>
   );

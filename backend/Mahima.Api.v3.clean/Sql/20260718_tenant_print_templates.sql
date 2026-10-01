@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS public.tenant_print_templates (
+    tenant_id uuid PRIMARY KEY REFERENCES public.tenants(id) ON DELETE CASCADE,
+    organization_name varchar(200) NOT NULL,
+    logo_url text NULL,
+    address text NULL,
+    phone varchar(80) NULL,
+    email varchar(200) NULL,
+    registration_number varchar(120) NULL,
+    tax_number varchar(120) NULL,
+    header_text text NULL,
+    footer_text text NULL,
+    primary_color varchar(16) NOT NULL DEFAULT '#047857',
+    show_logo boolean NOT NULL DEFAULT true,
+    show_address boolean NOT NULL DEFAULT true,
+    show_page_numbers boolean NOT NULL DEFAULT true,
+    paper_size varchar(16) NOT NULL DEFAULT 'A4',
+    orientation varchar(16) NOT NULL DEFAULT 'portrait',
+    created_at_utc timestamptz NOT NULL DEFAULT now(),
+    updated_at_utc timestamptz NOT NULL DEFAULT now()
+);

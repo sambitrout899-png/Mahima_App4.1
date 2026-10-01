@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { toast } from "react-toastify";
 import api from "../api";
 import { createWorkflowStyles } from "./ministryWorkflowStyles";
+import { printMinistryToken } from "../utils/printMinistryToken";
 
 const TABS = [
   { key: "all", label: "All", status: "", tone: "#0f172a" },
@@ -197,9 +198,7 @@ export default function CounsellingPage() {
                 onClick={() => setActiveTab(tab.key)}
                 style={{
                   ...styles.tab,
-                  background: isActive ? tab.tone : "#fff",
-                  color: isActive ? "#fff" : "#334155",
-                  boxShadow: isActive ? `0 12px 24px ${tab.tone}33` : "none",
+                  ...(isActive ? styles.activeTab : {}),
                 }}
               >
                 {tab.label}
@@ -323,6 +322,16 @@ function SessionTable({ items, tab, onSchedule, onComplete, onDelete }) {
                         style={styles.actionButton("#0f766e")}
                       >
                         Complete / Escalate
+                      </button>
+                    )}
+
+                    {s.tokenNumber && (
+                      <button
+                        type="button"
+                        onClick={() => printMinistryToken({ ministry: "Counselling", token: s.tokenNumber, personName: s.candidateName, date: s.scheduledAt, location: s.sessionType, status: s.status })}
+                        style={styles.actionButton("#7c3aed")}
+                      >
+                        Print Token
                       </button>
                     )}
 

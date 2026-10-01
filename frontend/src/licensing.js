@@ -11,6 +11,9 @@ export const FREE_PAGE_KEYS = new Set([
   "TEAMS",
   "ROLES",
   "PAGES",
+  "APP_DOWNLOADS",
+  "BIBLE",
+  "SECURITY",
 ]);
 
 export const PAGE_MODULES = {
@@ -21,20 +24,25 @@ export const PAGE_MODULES = {
   COSTS: "operations",
   REPORTS: "operations",
   AUDIT_TRAIL: "operations",
+  VOLUNTEERS: "operations",
 
   PASTOR: "care_ministry",
   README: "care_ministry",
   MARRIAGE: "care_ministry",
   BAPTISM: "care_ministry",
   COUNSELLING: "care_ministry",
+  EVENTS: "care_ministry",
+  CHECKIN: "care_ministry",
+  SERVICE_PLANS: "care_ministry",
 
   ADMIN_DASHBOARD: "admin_tools",
   LIVE_USERS: "admin_tools",
   MULTITENANT: "admin_tools",
+  TENANT_DASHBOARD: "admin_tools",
   SAAS_BILLING: "admin_tools",
   LANGUAGES: "admin_tools",
+  QA_AUTOMATION: "admin_tools",
 
-  APP_DOWNLOADS: "communications",
   MESSAGE_CENTER: "communications",
   EMAIL_CLIENT: "communications",
   GOOGLE_DRIVE: "communications",

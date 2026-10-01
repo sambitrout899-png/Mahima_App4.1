@@ -1,4 +1,6 @@
 ﻿// src/utils/auth.js
+import { readSharedAuthToken, writeSharedAuthToken, clearSharedAuthToken } from "./sharedAuthCookie";
+
 const TOKEN_KEY = "mahima_token";
 
 // Normalize any token (strip accidental "Bearer " prefixes, trim whitespace)
@@ -17,6 +19,7 @@ export function setToken(token) {
     localStorage.setItem(TOKEN_KEY, clean);
     localStorage.setItem("authToken", clean);
     localStorage.setItem("token", clean);
+    writeSharedAuthToken(clean);
   } catch {
     // ignore storage errors (quota/private mode)
   }
@@ -43,6 +46,18 @@ export function getToken() {
       }
     }
 
+    if (!t) {
+      const shared = readSharedAuthToken();
+      if (shared) {
+        t = shared;
+        try {
+          localStorage.setItem(TOKEN_KEY, normalizeToken(shared));
+          localStorage.setItem("authToken", normalizeToken(shared));
+          localStorage.setItem("token", normalizeToken(shared));
+        } catch {}
+      }
+    }
+
     return normalizeToken(t);
   } catch {
     return "";
@@ -56,6 +71,7 @@ export function clearToken() {
     localStorage.removeItem("auth_token");
     localStorage.removeItem("token");
     localStorage.removeItem("mahima_remember_login");
+    clearSharedAuthToken();
   } catch {
     // ignore
   }

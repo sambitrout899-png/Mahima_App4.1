@@ -15,6 +15,8 @@ namespace Mahima.Api.v3.clean.Dtos
     public class PastorBotReadMeDto
     {
         public string ImageDataUrl { get; set; } = string.Empty;
+        public string? ArtifactDataUrl { get; set; }
+        public string? ArtifactName { get; set; }
         public string? Note { get; set; }
         public bool ConsentAccepted { get; set; }
         public string? Language { get; set; }

@@ -59,16 +59,19 @@ export function speakText(text, options = {}) {
 
     (async () => {
       try {
+        const languages = [options.lang, ...(options.fallbackLangs || [])].filter(Boolean);
         for (const chunk of chunks) {
           if (cancelled) break;
-          await nativeTts.speak({
-            text: chunk,
-            lang: options.lang || "en-IN",
-            rate: options.rate ?? 0.9,
-            pitch: options.pitch ?? 1,
-            volume: 1,
-            category: "playback",
-          });
+          let spoken = false;
+          let lastError;
+          for (const lang of languages.length ? languages : ["en-IN"]) {
+            try {
+              await nativeTts.speak({ text: chunk, lang, rate: options.rate ?? 0.9, pitch: options.pitch ?? 1, volume: 1, category: "playback" });
+              spoken = true;
+              break;
+            } catch (error) { lastError = error; }
+          }
+          if (!spoken) throw lastError || new Error("No compatible text-to-speech language is installed.");
         }
         options.onEnd?.();
       } catch {
@@ -90,6 +93,23 @@ export function speakText(text, options = {}) {
   let index = 0;
   let stopped = false;
   let resumeTimer = null;
+  const requestedLanguages = [options.lang, ...(options.fallbackLangs || [])].filter(Boolean);
+
+  const findVoice = () => {
+    if (options.voice) return options.voice;
+    const voices = synth.getVoices?.() || [];
+    const normalized = requestedLanguages.map(lang => lang.toLowerCase());
+    for (const lang of normalized) {
+      const exact = voices.find(voice => voice.lang?.toLowerCase() === lang);
+      if (exact) return exact;
+      const base = lang.split("-")[0];
+      const related = voices.find(voice => voice.lang?.toLowerCase().split("-")[0] === base);
+      if (related) return related;
+    }
+    // Some engines expose Punjabi only in the voice name, often without a
+    // reliable locale tag.
+    return voices.find(voice => /punjabi|ਪੰਜਾਬੀ|ਪੰਜਾਬੀ/i.test(voice.name || "")) || null;
+  };
 
   const finish = () => {
     if (resumeTimer) {
@@ -109,11 +129,12 @@ export function speakText(text, options = {}) {
     const utterance = new Utterance(chunks[index]);
     index += 1;
 
-    utterance.lang = options.lang || "en-IN";
+    const selectedVoice = findVoice();
+    utterance.lang = selectedVoice?.lang || requestedLanguages[0] || "en-IN";
     utterance.rate = options.rate ?? 0.9;
     utterance.pitch = options.pitch ?? 0.95;
     utterance.volume = 1;
-    if (options.voice) utterance.voice = options.voice;
+    if (selectedVoice) utterance.voice = selectedVoice;
 
     utterance.onend = () => {
       window.setTimeout(playNext, 80);

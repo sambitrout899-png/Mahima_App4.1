@@ -1806,10 +1806,10 @@ export default function TasksPage() {
       `}</style>
 
       <div className="tasks-shell">
-        <div className="tasks-header">
+        <div className="tasks-header mahima-standard-page-header" data-mahima-explicit-header="true">
           <div>
-            <h1 className="tasks-title">Tasks</h1>
-            <div className="tasks-subtitle">
+            <h1 className="tasks-title mahima-standard-page-title" data-mahima-explicit-title="true">Tasks</h1>
+            <div className="tasks-subtitle mahima-standard-page-subtitle">
               Plan, assign, track, and message ministry tasks with clear ownership.
             </div>
           </div>

@@ -1,6 +1,7 @@
 ﻿// src/features/auth/authService.js
 
 import api, { API_BASE } from "../../api";
+import { writeSharedAuthToken, clearSharedAuthToken } from "../../utils/sharedAuthCookie";
 
 const TOKEN_KEY = "mahima_token";
 const USERNAME_KEY = "mahima_username";
@@ -101,6 +102,7 @@ export function setToken(token) {
       localStorage.setItem(TOKEN_KEY, cleanToken);
       localStorage.setItem("authToken", cleanToken);
       localStorage.setItem("token", cleanToken);
+      writeSharedAuthToken(cleanToken);
       if (api?.defaults?.headers?.common) {
         api.defaults.headers.common["Authorization"] = `Bearer ${cleanToken}`;
       }
@@ -124,6 +126,7 @@ export function removeToken() {
     localStorage.removeItem("auth_token");
     localStorage.removeItem("token");
     localStorage.removeItem("mahima_remember_login");
+    clearSharedAuthToken();
     if (api?.defaults?.headers?.common) {
       delete api.defaults.headers.common["Authorization"];
     }

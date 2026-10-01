@@ -1,5 +1,7 @@
 ﻿import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { tenantLoginRoute } from "../utils/tenantNavigation";
+import { clearSharedAuthToken } from "../utils/sharedAuthCookie";
 
 function isMobileAppMode() {
   try {
@@ -40,8 +42,9 @@ export default function AutoLogoutWrapper({ children }) {
     localStorage.removeItem("mahima_token");
     localStorage.removeItem("authToken");
     localStorage.removeItem("token");
+    clearSharedAuthToken();
 
-    navigate("/login");
+    navigate(tenantLoginRoute(), { replace: true });
   };
 
   const resetTimer = () => {

@@ -13,6 +13,7 @@ namespace Mahima.Api.v3.clean.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Microsoft.AspNetCore.Authorization.Authorize]
     public class TeamsController : ControllerBase
     {
         private readonly string _connectionString;
@@ -41,6 +42,7 @@ namespace Mahima.Api.v3.clean.Controllers
 
         // POST /api/teams
         [HttpPost]
+        [Microsoft.AspNetCore.Authorization.Authorize(Roles = "admin,Admin,ADMIN")]
         public async Task<IActionResult> Create([FromBody] TeamCreateDto dto)
         {
             if (dto == null || string.IsNullOrWhiteSpace(dto.Name))
@@ -181,6 +183,7 @@ namespace Mahima.Api.v3.clean.Controllers
 
         // PUT /api/teams/{id}
         [HttpPut("{id}")]
+        [Microsoft.AspNetCore.Authorization.Authorize(Roles = "admin,Admin,ADMIN")]
         public async Task<IActionResult> Update(string id, [FromBody] TeamCreateDto dto)
         {
             if (dto == null || string.IsNullOrWhiteSpace(dto.Name))
@@ -225,6 +228,7 @@ namespace Mahima.Api.v3.clean.Controllers
 
         // DELETE /api/teams/{id}
         [HttpDelete("{id}")]
+        [Microsoft.AspNetCore.Authorization.Authorize(Roles = "admin,Admin,ADMIN")]
         public async Task<IActionResult> Delete(string id)
         {
             try

@@ -1,3 +1,5 @@
+import { getTenantPrintDefinition, tenantPrintContact } from "../../utils/tenantPrintDefinition";
+
 const QR_URL = "/assets/upi-qr.png";
 
 function money(value) {
@@ -14,9 +16,19 @@ function escapeHtml(value) {
 
 export function printDonationInvoice(invoice) {
   if (!invoice) return;
+  const template = getTenantPrintDefinition();
+  const printContact = tenantPrintContact(template);
   const lines = Array.isArray(invoice.lines) ? invoice.lines : [];
-  const w = window.open("", "_blank", "noopener,noreferrer,width=960,height=720");
-  if (!w) return;
+  // Browsers may deliberately return `null` for a window opened with the
+  // `noopener` feature. That left a real tab open but gave us no document to
+  // populate, producing the reported blank invoice. Open a writable document
+  // first, then sever the opener reference immediately.
+  const w = window.open("", "_blank", "width=960,height=720");
+  if (!w) {
+    window.alert("The invoice window was blocked. Please allow pop-ups for this site and try again.");
+    return;
+  }
+  try { w.opener = null; } catch { /* browser may already isolate the window */ }
 
   const lineRows = lines.map((line) => `
     <tr>
@@ -31,10 +43,13 @@ export function printDonationInvoice(invoice) {
   w.document.write(`<!doctype html>
 <html>
 <head>
+  <base href="${escapeHtml(`${window.location.origin}/`)}">
   <title>${escapeHtml(invoice.invoiceNumber || "Donation Invoice")}</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 32px; color: #0f172a; }
-    .top { display: flex; justify-content: space-between; gap: 24px; border-bottom: 2px solid #0f766e; padding-bottom: 18px; }
+    .top { display: flex; justify-content: space-between; gap: 24px; border-bottom: 2px solid ${escapeHtml(template.primaryColor)}; padding-bottom: 18px; }
+    .brand { display:flex; align-items:center; gap:12px; }
+    .brand img { width:54px; height:54px; object-fit:contain; }
     h1 { margin: 0; font-size: 28px; }
     .muted { color: #64748b; font-size: 13px; line-height: 1.5; }
     .badge { display: inline-block; margin-top: 8px; padding: 6px 10px; border-radius: 999px; background: #ecfdf5; color: #047857; font-weight: 800; font-size: 12px; text-transform: uppercase; }
@@ -52,16 +67,23 @@ export function printDonationInvoice(invoice) {
     .donation { display: grid; grid-template-columns: 150px 1fr; gap: 18px; align-items: center; margin-top: 28px; border: 1px solid #bbf7d0; background: #f0fdf4; border-radius: 10px; padding: 16px; }
     .donation img { width: 150px; height: 150px; object-fit: contain; border-radius: 8px; background: white; }
     .footer { margin-top: 24px; font-size: 12px; line-height: 1.6; color: #475569; }
-    @media print { button { display: none; } body { margin: 20px; } }
+    .print-help { margin: 0 0 18px; padding: 10px 12px; border-radius: 8px; background: #eff6ff; color: #1e40af; font-size: 12px; font-weight: 700; }
+    @page { size: ${escapeHtml(template.paperSize)} ${escapeHtml(template.orientation)}; margin: 14mm; }
+    @media print { .no-print { display: none !important; } body { margin: 0; } }
   </style>
 </head>
 <body>
-  <button onclick="window.print()" style="float:right;padding:10px 14px;border:0;border-radius:8px;background:#047857;color:white;font-weight:800;">Save / Print PDF</button>
+  <button class="no-print" onclick="window.print()" style="float:right;padding:10px 14px;border:0;border-radius:8px;background:#047857;color:white;font-weight:800;cursor:pointer;">Save / Print PDF</button>
+  <div class="print-help no-print">Invoice loaded successfully. Select “Save / Print PDF” when the preview is ready.</div>
   <div class="top">
-    <div>
-      <h1>Donation Invoice</h1>
-      <div class="muted">Mahima Ministries Welfare Society</div>
-      <span class="badge">${escapeHtml(invoice.status || "open")}</span>
+    <div class="brand">
+      ${template.logoUrl ? `<img src="${escapeHtml(template.logoUrl)}" alt="Organization logo" />` : ""}
+      <div>
+        <h1>Donation Invoice</h1>
+        <div class="muted"><strong>${escapeHtml(template.organizationName)}</strong>${printContact ? `<br>${escapeHtml(printContact)}` : ""}</div>
+        ${template.headerText ? `<div class="muted">${escapeHtml(template.headerText)}</div>` : ""}
+        <span class="badge">${escapeHtml(invoice.status || "open")}</span>
+      </div>
     </div>
     <div class="muted" style="text-align:right">
       <div><strong>${escapeHtml(invoice.invoiceNumber || "")}</strong></div>
@@ -100,18 +122,25 @@ export function printDonationInvoice(invoice) {
     <img src="${QR_URL}" alt="UPI QR Code" />
     <div>
       <h2 style="margin:0 0 8px;">Donate via UPI QR</h2>
-      <div class="muted">Scan this QR to donate to the Mahima Ministries Welfare Society account. Please share the UPI reference with Mahima admin for reconciliation.</div>
+      <div class="muted">Scan this QR to donate to the account shown. Please share the UPI reference with your church administrator for reconciliation.</div>
       <div class="value" style="margin-top:10px;">Amount: ${money(invoice.balanceInr || invoice.totalInr)}</div>
     </div>
   </div>
 
   <div class="footer">
-    This document is generated for monthly church SAAS access tracking. The amount is treated as a donation to the welfare society account, not a commercial sale invoice.
+    ${template.footerText ? `${escapeHtml(template.footerText)}<br>` : ""}This document is generated for monthly church SAAS access tracking. The amount is treated as a donation to the welfare society account, not a commercial sale invoice.
   </div>
 </body>
 </html>`);
   w.document.close();
-  w.focus();
+  const finish = () => {
+    try {
+      w.document.title = invoice.invoiceNumber || "Donation Invoice";
+      w.focus();
+    } catch { /* window may have been closed */ }
+  };
+  if (w.document.readyState === "complete") finish();
+  else w.addEventListener("load", finish, { once: true });
 }
 
 export { QR_URL, money };

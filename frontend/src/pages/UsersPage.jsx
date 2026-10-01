@@ -30,7 +30,7 @@ export default function UsersPage(){
       </div>
 
       <div className='space-y-2'>
-        {isLoading && <div className='p-4 bg-white rounded shadow-sm'>Loadingâ€¦</div>}
+        {isLoading && <div className='p-4 bg-white rounded shadow-sm'>Loading…</div>}
         {!isLoading && (data||[]).map(u=>(
           <div key={u.id} className='p-3 bg-white rounded shadow-sm flex justify-between items-center'>
             <div>

@@ -470,11 +470,20 @@ function isAdminUser(user) {
   ];
   return roleValues.some((role) => {
     const normalized = String(role || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-    return normalized === "admin" || normalized === "administrator" || normalized === "superadmin" || normalized.includes("admin");
-  }) || [user?.pages, user?.Pages, user?.permissions, user?.Permissions]
-    .filter(Array.isArray)
-    .flat()
-    .some((page) => ["ADMIN_DASHBOARD", "USERS", "ROLES"].includes(String(page?.code || page?.Code || page).toUpperCase()));
+    return ["admin", "administrator", "rootadmin", "tenantadmin", "superadmin", "platformadmin"].includes(normalized);
+  });
+}
+
+function isStaffUser(user) {
+  const roleValues = [
+    user?.role,
+    user?.Role,
+    user?.roleName,
+    user?.RoleName,
+    ...(Array.isArray(user?.roles) ? user.roles : []),
+    ...(Array.isArray(user?.Roles) ? user.Roles : []),
+  ];
+  return roleValues.some((role) => String(role || "").trim().toLowerCase() === "staff");
 }
 
 function findEventTemplate(task, eventConfig, templates = EVENT_ACTIVITY_TEMPLATES) {
@@ -821,6 +830,7 @@ export default function TasksPage() {
   );
   const currentUser = useMemo(() => readCurrentUser(), []);
   const isAdmin = useMemo(() => isAdminUser(currentUser), [currentUser]);
+  const canCreateTask = useMemo(() => isAdmin || isStaffUser(currentUser), [currentUser, isAdmin]);
   const [genWeeks,     setGenWeeks]     = useState(4);
   const [genSelected,  setGenSelected]  = useState(() => new Set(CHURCH_EVENTS_DEFAULT.map((e) => e.id)));
   const [genDesign, setGenDesign] = useState({});
@@ -845,7 +855,7 @@ export default function TasksPage() {
       const normalized = Array.isArray(data)
         ? data.map((t) => {
             // assignees can be: an array of {id,type}, separate users[]+teams[],
-            // or just a legacy assigneeId â€” handle all three
+            // or just a legacy assigneeId — handle all three
             let assignees = [];
             const raw = t.assignees ?? t.Assignees;
             if (Array.isArray(raw)) {
@@ -876,6 +886,8 @@ export default function TasksPage() {
               subTaskCount: Number(t.subTaskCount ?? t.SubTaskCount ?? 0),
               activityLog: t.activityLog ?? t.ActivityLog ?? [],
               canUpdate: Boolean(t.canUpdate ?? t.CanUpdate ?? true),
+              canReassign: Boolean(t.canReassign ?? t.CanReassign ?? false),
+              canDelete: Boolean(t.canDelete ?? t.CanDelete ?? false),
               readOnly: Boolean(t.readOnly ?? t.ReadOnly ?? false),
               visibilityReason: t.visibilityReason ?? t.VisibilityReason ?? "",
               ownerPositionId: t.ownerPositionId ?? t.OwnerPositionId ?? null,
@@ -888,6 +900,30 @@ export default function TasksPage() {
             };
           })
         : [];
+
+      // Older task API versions do not return ParentTaskId/EventRef even
+      // though generated sub-activities carry an explicit "Master:" marker
+      // in their description. Rebuild the hierarchy deterministically so
+      // each weekly event stays grouped after refresh or deployment.
+      const mastersByTitle = new Map(
+        normalized
+          .filter((task) => /^Auto-generated for /i.test(task.description || ""))
+          .map((task) => [String(task.title || "").trim().toLowerCase(), task])
+      );
+      normalized.forEach((task) => {
+        const description = String(task.description || "");
+        const masterTitle = description.match(/^Master:\s*(.+)$/im)?.[1]?.trim();
+        if (!task.parentTaskId && masterTitle) {
+          const master = mastersByTitle.get(masterTitle.toLowerCase());
+          if (master && String(master.id) !== String(task.id)) task.parentTaskId = master.id;
+        }
+        if (!task.isAutoGen && (description.includes(AUTO_MARKER) || /^Auto-generated for /i.test(description))) {
+          task.isAutoGen = true;
+        }
+        if (task.recurring === "none" && /^Auto-generated for /i.test(description)) {
+          task.recurring = "weekly";
+        }
+      });
       setTasks(normalized);
     } catch (e) {
       setError("Couldn't load tasks. Check your session and try again.");
@@ -898,6 +934,23 @@ export default function TasksPage() {
   }
 
   async function fetchPeople() {
+    // Staff only receive users in their active position. The API enforces the
+    // same boundary on create/reassign, so this is both a focused picker and
+    // not merely a client-side restriction.
+    if (!isAdmin) {
+      try {
+        const data = await api("/tasks/eligible-assignees");
+        const nextUsers = Array.isArray(data) ? data.map(normalizeUser) : [];
+        setUsers(nextUsers);
+        setTeams([]);
+        return { users: nextUsers, teams: [] };
+      } catch {
+        setUsers([]);
+        setTeams([]);
+        return { users: [], teams: [] };
+      }
+    }
+
     // fetch users + teams in parallel; tolerate either being unavailable.
     // /users returns { items, total, page, limit }; /teams returns a bare array.
     const [u, tm] = await Promise.allSettled([
@@ -1280,7 +1333,7 @@ export default function TasksPage() {
     }
     setSaving(true);
     const assignees = form.assignees ?? [];
-    // Legacy column is bigint â€” only safe to populate from numeric IDs.
+    // Legacy column is bigint — only safe to populate from numeric IDs.
     // Once the TaskAssignees join table is live, this can stay null and the
     // join table becomes the source of truth.
     const numericId = (() => {
@@ -1308,7 +1361,13 @@ export default function TasksPage() {
       Assignees: assignees.map((a) => ({ Id: String(a.id), Type: a.type })),
     };
     try {
-      if (form.id) {
+      if (form.id && form.reassignOnly) {
+        await api(`/tasks/${form.id}/reassign`, {
+          method: "POST",
+          body: JSON.stringify(payload.Assignees),
+        });
+        toast.push("Task reassigned. The assignee will be notified.", "success");
+      } else if (form.id) {
         await api(`/tasks/${form.id}`, { method: "PUT", body: JSON.stringify(payload) });
         toast.push("Task updated", "success");
       } else {
@@ -1506,7 +1565,7 @@ export default function TasksPage() {
   }
 
   function openEdit(t) {
-    if (t?.readOnly || t?.canUpdate === false) {
+    if ((t?.readOnly || t?.canUpdate === false) && !t?.canReassign) {
       toast.push(readOnlyMessage(t), "info");
       return;
     }
@@ -1525,6 +1584,7 @@ export default function TasksPage() {
       assigneeId: t.assigneeId ?? null,
       assignees: t.assignees ? [...t.assignees] : [],
       recurring: t.recurring || "none",
+      reassignOnly: !t.canUpdate && Boolean(t.canReassign),
     });
     setShow(true);
   }
@@ -1544,6 +1604,7 @@ export default function TasksPage() {
       followUpNotes: "",
       assignees: [],
       recurring: "none",
+      reassignOnly: false,
     };
   }
 
@@ -1659,20 +1720,20 @@ export default function TasksPage() {
       <Styles />
 
       {/* Header */}
-      <header className="tp-header">
+      <header className="tp-header mahima-standard-page-header" data-mahima-explicit-header="true">
         <div className="tp-header-inner">
           <div className="tp-brand">
             <div className="tp-logo"><ListTodo size={20} /></div>
             <div>
-              <div className="tp-title">Tasks</div>
-              <div className="tp-subtitle">Stay on top of what matters</div>
+              <h1 className="tp-title mahima-standard-page-title" data-mahima-explicit-title="true">Tasks</h1>
+              <div className="tp-subtitle mahima-standard-page-subtitle">Stay on top of what matters</div>
             </div>
           </div>
 
           <div className="tp-search">
             <Search size={16} />
             <input
-              placeholder="Search tasksâ€¦"
+              placeholder="Search tasks…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -1698,13 +1759,13 @@ export default function TasksPage() {
                 <span className="hide-sm">Report</span>
               </button>
             )}
-            <button className="tp-btn ghost" onClick={() => { setShowAutoGen(true); }} title="Auto-generate church events">
+            {isAdmin && <button className="tp-btn ghost" onClick={() => { setShowAutoGen(true); }} title="Auto-generate church events">
               <Zap size={15} />
               <span className="hide-sm">Auto-generate</span>
-            </button>
-            <button className="tp-btn ghost" onClick={() => setShowSettings(true)} title="Church event settings">
+            </button>}
+            {isAdmin && <button className="tp-btn ghost" onClick={() => setShowSettings(true)} title="Church event settings">
               <Settings size={15} />
-            </button>
+            </button>}
             {isAdmin && (
               <>
                 <button className="tp-btn ghost" onClick={() => setShowTemplateAdmin(true)} title="Activity templates">
@@ -1717,9 +1778,9 @@ export default function TasksPage() {
                 </button>
               </>
             )}
-            <button className="tp-btn primary" onClick={openNew}>
+            {canCreateTask && <button className="tp-btn primary" onClick={openNew}>
               <Plus size={16} /> New task
-            </button>
+            </button>}
           </div>
         </div>
       </header>
@@ -1837,14 +1898,14 @@ export default function TasksPage() {
           <EmptyState
             hasAny={tasks.length > 0}
             onClear={() => { setSF("all"); setPF("all"); setQuery(""); }}
-            onNew={openNew}
+            onNew={canCreateTask ? openNew : null}
           />
         ) : view === "grid" ? (
           <TaskHierarchy
             nodes={hierarchy}
             onToggle={toggleStatus}
             onEdit={openEdit}
-            onSubTask={openNew}
+            onSubTask={canCreateTask ? openNew : null}
             onDelete={setConf}
             onRemind={(t) => { setReminderTask(t); setReminderNote(""); setReminderSent(false); setShowReminder(true); }}
             linkedTaskId={linkedTaskId}
@@ -1854,7 +1915,7 @@ export default function TasksPage() {
             tasks={filtered}
             onToggle={toggleStatus}
             onEdit={openEdit}
-            onSubTask={openNew}
+            onSubTask={canCreateTask ? openNew : null}
             onDelete={setConf}
             onRemind={(t) => { setReminderTask(t); setReminderNote(""); setReminderSent(false); setShowReminder(true); }}
             linkedTaskId={linkedTaskId}
@@ -1863,9 +1924,9 @@ export default function TasksPage() {
       </main>
 
       {/* FAB on mobile */}
-      <button className="tp-fab" onClick={openNew} aria-label="New task">
+      {canCreateTask && <button className="tp-fab" onClick={openNew} aria-label="New task">
         <Plus size={24} />
-      </button>
+      </button>}
 
       {/* Modal */}
       {showModal && (
@@ -1877,6 +1938,7 @@ export default function TasksPage() {
           teams={teams}
           loadTeamMembers={loadTeamMembers}
           tasks={tasks}
+          canManageAutomation={isAdmin}
           onClose={() => setShow(false)}
           onSubmit={handleSave}
         />
@@ -1982,7 +2044,7 @@ export default function TasksPage() {
       )}
 
       {/* ── Auto-generate modal ── */}
-      {showAutoGen && (
+      {isAdmin && showAutoGen && (
         <AutoGenModal
           churchEvents={churchEvents}
           genSelected={genSelected}
@@ -2003,7 +2065,7 @@ export default function TasksPage() {
       )}
 
       {/* ── Church event settings modal ── */}
-      {showSettings && (
+      {isAdmin && showSettings && (
         <ChurchEventSettings
           churchEvents={churchEvents}
           setChurchEvents={(next) => {
@@ -2119,7 +2181,7 @@ function TaskTreeNode({ node, depth, linkedTaskId, onToggle, onEdit, onSubTask, 
         children={node.children}
         onToggle={() => onToggle(task)}
         onEdit={() => onEdit(task)}
-        onSubTask={() => onSubTask(task)}
+        onSubTask={onSubTask ? () => onSubTask(task) : null}
         onDelete={() => onDelete(task)}
         onRemind={() => onRemind(task)}
         linked={String(linkedTaskId || "") === String(task.id)}
@@ -2220,15 +2282,15 @@ function TaskCard({ task, children = [], linked = false, onToggle, onEdit, onSub
             <button className="tp-icon-btn remind" onClick={onRemind} title="Send Jai Masih reminder">
               <Bell size={14} />
             </button>
-            <button className="tp-icon-btn" onClick={onSubTask} title={readOnly ? readOnlyTitle : "Add follow-up subtask"} disabled={readOnly}>
+            {onSubTask && <button className="tp-icon-btn" onClick={onSubTask} title={readOnly ? readOnlyTitle : "Add follow-up subtask"} disabled={readOnly}>
               <Plus size={14} />
-            </button>
+            </button>}
             <button className="tp-icon-btn" onClick={onEdit} title={readOnly ? readOnlyTitle : "Edit"} disabled={readOnly}>
               <Pencil size={14} />
             </button>
-            <button className="tp-icon-btn danger" onClick={onDelete} title={readOnly ? readOnlyTitle : "Delete"} disabled={readOnly}>
+            {task.canDelete && <button className="tp-icon-btn danger" onClick={onDelete} title="Delete">
               <Trash2 size={14} />
-            </button>
+            </button>}
           </div>
         </div>
       </div>
@@ -2267,7 +2329,7 @@ function Board({ tasks, linkedTaskId, onToggle, onEdit, onSubTask, onDelete, onR
                     task={t}
                     onToggle={() => onToggle(t)}
                     onEdit={() => onEdit(t)}
-                    onSubTask={() => onSubTask(t)}
+                    onSubTask={onSubTask ? () => onSubTask(t) : null}
                     onDelete={() => onDelete(t)}
                     onRemind={() => onRemind(t)}
                     linked={String(linkedTaskId || "") === String(t.id)}
@@ -2310,9 +2372,9 @@ function EmptyState({ hasAny, onClear, onNew }) {
         {hasAny ? (
           <button className="tp-btn ghost" onClick={onClear}>Clear filters</button>
         ) : null}
-        <button className="tp-btn primary" onClick={onNew}>
+        {onNew && <button className="tp-btn primary" onClick={onNew}>
           <Plus size={16} /> New task
-        </button>
+        </button>}
       </div>
     </div>
   );
@@ -2354,8 +2416,8 @@ function Avatar({ entity, size = 26, ring = true }) {
     boxShadow: ring ? "0 0 0 2px #fff" : "none",
   };
   const title = isTeam
-    ? `${entity.name}${entity.memberCount ? ` (${entity.memberCount})` : ""} Â· Team`
-    : `${entity.name}${entity.email ? ` Â· ${entity.email}` : ""}`;
+    ? `${entity.name}${entity.memberCount ? ` (${entity.memberCount})` : ""} · Team`
+    : `${entity.name}${entity.email ? ` · ${entity.email}` : ""}`;
 
   return (
     <span className={`tp-avatar ${isTeam ? "is-team" : ""}`} style={style} title={title}>
@@ -2476,7 +2538,7 @@ function AssigneePicker({ users, teams, selected, onChange, loadTeamMembers }) {
         <div className="tp-picker-chips">
           {selected.length === 0 ? (
             <span className="tp-picker-placeholder">
-              <Users size={14} /> Assign people or teamsâ€¦
+              <Users size={14} /> Assign people or teams...
             </span>
           ) : (
             selected.map((a) => (
@@ -2512,7 +2574,7 @@ function AssigneePicker({ users, teams, selected, onChange, loadTeamMembers }) {
             <Search size={14} />
             <input
               autoFocus
-              placeholder="Search people or teamsâ€¦"
+              placeholder="Search people or teams..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -2563,7 +2625,7 @@ function AssigneePicker({ users, teams, selected, onChange, loadTeamMembers }) {
                             <div className="tp-team-members">
                               {loading ? (
                                 <div className="tp-picker-empty small">
-                                  <Loader2 size={13} className="spin" /> Loading membersâ€¦
+                                  <Loader2 size={13} className="spin" /> Loading members…
                                 </div>
                               ) : memberIds.length === 0 ? (
                                 <div className="tp-picker-empty small">No members in this team</div>
@@ -2580,7 +2642,7 @@ function AssigneePicker({ users, teams, selected, onChange, loadTeamMembers }) {
                                     const u = userIndex.get(String(uid));
                                     if (!u) return (
                                       <div key={`m-${uid}`} className="tp-picker-empty small">
-                                        Unknown user Â· {String(uid).slice(0, 8)}â€¦
+                                        Unknown user · {String(uid).slice(0, 8)}…
                                       </div>
                                     );
                                     return (
@@ -2646,7 +2708,7 @@ function PickerRow({ entity, selected, onToggle, compact = false }) {
         <div className="tp-picker-row-name">{entity.name}</div>
         <div className="tp-picker-row-sub">
           {entity.type === "team"
-            ? `Team${entity.memberCount ? ` Â· ${entity.memberCount} members` : ""}`
+            ? `Team${entity.memberCount ? ` · ${entity.memberCount} members` : ""}`
             : entity.email || "User"}
         </div>
       </div>
@@ -2659,7 +2721,7 @@ function PickerRow({ entity, selected, onToggle, compact = false }) {
 
 /* ------------------ Modal ------------------ */
 
-function TaskModal({ form, setForm, saving, users, teams, loadTeamMembers, tasks, onClose, onSubmit }) {
+function TaskModal({ form, setForm, saving, users, teams, loadTeamMembers, tasks, canManageAutomation, onClose, onSubmit }) {
   useEffect(() => {
     const onEsc = (e) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onEsc);
@@ -2671,15 +2733,15 @@ function TaskModal({ form, setForm, saving, users, teams, loadTeamMembers, tasks
       <form className="tp-modal" onSubmit={onSubmit}>
         <header className="tp-modal-head">
           <div>
-            <h2>{form.id ? "Edit task" : "New task"}</h2>
-            <p>{form.id ? "Update the details below." : "What needs to get done?"}</p>
+            <h2>{form.reassignOnly ? "Reassign task" : form.id ? "Edit task" : "New task"}</h2>
+            <p>{form.reassignOnly ? "Read-only task access; reassignment is limited to your active position." : form.id ? "Update the details below." : "What needs to get done?"}</p>
           </div>
           <button type="button" className="tp-icon-btn" onClick={onClose} aria-label="Close">
             <X size={16} />
           </button>
         </header>
 
-        <div className="tp-modal-body">
+        <div className={`tp-modal-body${form.reassignOnly ? " reassign-only" : ""}`}>
           <Field label="Title" required>
             <input
               autoFocus
@@ -2722,7 +2784,7 @@ function TaskModal({ form, setForm, saving, users, teams, loadTeamMembers, tasks
             <div className="tp-field-hint">Use this to create follow-up activities and subtasks under a larger process.</div>
           </Field>
 
-          <Field label="Assignees">
+          {form.id ? <Field label="Assignees" className="reassign-field">
             <AssigneePicker
               users={users}
               teams={teams}
@@ -2735,7 +2797,11 @@ function TaskModal({ form, setForm, saving, users, teams, loadTeamMembers, tasks
                 No people or teams loaded. Make sure <code>/api/users</code> and <code>/api/teams</code> are reachable.
               </div>
             )}
-          </Field>
+          </Field> : (
+            <div className="tp-field-hint">
+              This task will initially be assigned to you. After creating it, you can reassign it according to your role and position access.
+            </div>
+          )}
 
           <div className="tp-row-2">
             <Field label="Follow-up date">
@@ -2768,17 +2834,17 @@ function TaskModal({ form, setForm, saving, users, teams, loadTeamMembers, tasks
             </div>
           </Field>
 
-          <Field label="Recurring">
+          {canManageAutomation && <Field label="Recurring">
             <select value={form.recurring || "none"} onChange={(e) => setForm({ ...form, recurring: e.target.value })}>
               {RECUR_PATTERNS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
             </select>
-          </Field>
+          </Field>}
         </div>
 
         <footer className="tp-modal-foot">
           <button type="button" className="tp-btn ghost" onClick={onClose}>Cancel</button>
           <button type="submit" className="tp-btn primary" disabled={saving}>
-            {saving ? <><Loader2 size={15} className="spin" /> Savingâ€¦</> : (form.id ? "Save changes" : "Create task")}
+            {saving ? <><Loader2 size={15} className="spin" /> Saving…</> : (form.reassignOnly ? "Reassign task" : form.id ? "Save changes" : "Create task")}
           </button>
         </footer>
       </form>
@@ -2786,9 +2852,9 @@ function TaskModal({ form, setForm, saving, users, teams, loadTeamMembers, tasks
   );
 }
 
-function Field({ label, required, children }) {
+function Field({ label, required, children, className = "" }) {
   return (
-    <label className="tp-field">
+    <label className={`tp-field ${className}`}>
       <span className="tp-field-label">
         {label}{required && <span className="req">*</span>}
       </span>
@@ -3310,7 +3376,7 @@ function ActivityTemplateAdminModal({ templateJson, setTemplateJson, templates, 
 
   return (
     <div className="tp-modal-bg" onClick={(e) => e.target.classList.contains("tp-modal-bg") && onClose()}>
-      <div className="tp-modal tp-template-modal">
+      <div className="tp-modal tp-template-modal" style={{ width: "min(1240px, calc(100vw - 32px))", maxWidth: 1240 }}>
         <header className="tp-modal-head">
           <div>
             <h2><ListTodo size={18} style={{ verticalAlign: "middle", marginRight: 6, color: "var(--enterprise-primary, #047857)" }} />Task Messages</h2>
@@ -4472,6 +4538,10 @@ function Styles() {
         grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
         gap: 8px;
       }
+      .tp-modal-body.reassign-only > .tp-field:not(.reassign-field),
+      .tp-modal-body.reassign-only > .tp-row-2 {
+        display: none;
+      }
       .tp-danger-note {
         margin-top: 14px;
         padding: 10px 12px;
@@ -4538,13 +4608,39 @@ function Styles() {
         box-shadow: 0 0 0 3px rgba(16,185,129,.14);
       }
       .tp-template-modal {
-        width: min(1080px, calc(100vw - 32px));
-        max-height: min(880px, calc(100vh - 32px));
+        width: min(1240px, calc(100vw - 32px));
+        max-width: 1240px;
+        max-height: calc(100dvh - 32px);
+        border-radius: 20px;
+      }
+      .tp-template-modal .tp-modal-head {
+        padding: 22px 28px 16px;
+        border-bottom: 1px solid var(--border);
+        background: linear-gradient(135deg, #ffffff, #f0fdf4 58%, #fffbeb);
+      }
+      .tp-template-modal .tp-modal-head h2 {
+        font-size: 22px;
+        font-weight: 900;
+      }
+      .tp-template-modal .tp-modal-head p {
+        margin-top: 5px;
+        max-width: 760px;
+        font-size: 13.5px;
+        line-height: 1.5;
+      }
+      .tp-template-modal .tp-modal-body {
+        display: block;
+        padding: 20px 28px 28px;
+        overflow-x: hidden;
+        overflow-y: auto;
+      }
+      .tp-template-modal .tp-modal-foot {
+        padding: 16px 28px;
       }
       .tp-template-workspace {
         display: grid;
-        grid-template-columns: 230px minmax(0, 1fr);
-        gap: 14px;
+        grid-template-columns: 260px minmax(0, 1fr);
+        gap: 22px;
         align-items: start;
       }
       .tp-template-nav {
@@ -4552,9 +4648,9 @@ function Styles() {
         top: 0;
         display: grid;
         gap: 8px;
-        max-height: min(66vh, 620px);
-        overflow: auto;
-        padding: 4px;
+        max-height: none;
+        overflow: visible;
+        padding: 8px;
         border: 1px solid var(--border);
         border-radius: 14px;
         background: #f8fafc;
@@ -4563,11 +4659,12 @@ function Styles() {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 10px;
+        gap: 12px;
         width: 100%;
         border: 1px solid transparent;
         border-radius: 10px;
-        padding: 10px 11px;
+        min-height: 48px;
+        padding: 12px 14px;
         background: transparent;
         color: var(--text-2);
         cursor: pointer;
@@ -4605,23 +4702,24 @@ function Styles() {
       .tp-template-editor-panel {
         min-width: 0;
         border: 1px solid var(--border);
-        border-radius: 14px;
+        border-radius: 18px;
         background: #fff;
-        overflow: hidden;
+        overflow: visible;
+        box-shadow: 0 14px 36px rgba(15,23,42,.07);
       }
       .tp-template-panel-head {
         display: flex;
         align-items: flex-start;
         justify-content: space-between;
         gap: 12px;
-        padding: 14px 16px;
+        padding: 18px 20px;
         border-bottom: 1px solid var(--border);
         background: linear-gradient(180deg, #f8fafc, #fff);
       }
       .tp-template-panel-head h3 {
         margin: 0;
         color: var(--text-1);
-        font-size: 15px;
+        font-size: 18px;
         font-weight: 900;
       }
       .tp-template-panel-head p {
@@ -4642,19 +4740,19 @@ function Styles() {
       }
       .tp-message-template-list {
         display: grid;
-        gap: 12px;
-        max-height: min(62vh, 610px);
-        overflow: auto;
-        padding: 14px;
+        gap: 18px;
+        max-height: none;
+        overflow: visible;
+        padding: 20px;
       }
       .tp-message-template-card {
         display: grid;
-        gap: 10px;
-        padding: 13px;
+        gap: 16px;
+        padding: 20px;
         border: 1px solid var(--border);
-        border-radius: 12px;
-        background: #fff;
-        box-shadow: 0 1px 2px rgba(15,23,42,.03);
+        border-radius: 16px;
+        background: linear-gradient(145deg, #fff, #f8fafc);
+        box-shadow: 0 8px 24px rgba(15,23,42,.06);
       }
       .tp-message-template-card-head {
         display: flex;
@@ -4682,7 +4780,7 @@ function Styles() {
         gap: 10px;
       }
       .tp-message-template-meta.three {
-        grid-template-columns: minmax(220px, 1fr) 160px 140px;
+        grid-template-columns: minmax(300px, 1.35fr) minmax(170px, .75fr) minmax(160px, .65fr);
       }
       .tp-template-language-tabs {
         display: inline-flex;
@@ -4720,16 +4818,16 @@ function Styles() {
       }
       .tp-message-template-text {
         width: 100%;
-        min-height: 108px;
+        min-height: 132px;
         resize: vertical;
         border: 1px solid var(--border);
         border-radius: 10px;
-        padding: 10px 12px;
+        padding: 13px 14px;
         outline: none;
         color: var(--text-1);
         background: #fff;
-        font-size: 13.5px;
-        line-height: 1.5;
+        font-size: 14px;
+        line-height: 1.6;
       }
       .tp-message-template-text:focus {
         border-color: var(--primary-400);
@@ -4737,12 +4835,21 @@ function Styles() {
       }
       @media (max-width: 860px) {
         .tp-template-workspace { grid-template-columns: 1fr; }
-        .tp-template-nav { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: none; }
+        .tp-template-nav { position: static; grid-template-columns: repeat(3, minmax(0, 1fr)); max-height: none; }
+        .tp-message-template-meta.three { grid-template-columns: 1fr 1fr; }
+        .tp-message-template-meta.three label:first-child { grid-column: 1 / -1; }
       }
       @media (max-width: 720px) {
         .tp-message-template-meta { grid-template-columns: 1fr; }
         .tp-template-nav { grid-template-columns: 1fr; }
         .tp-template-panel-head { flex-direction: column; }
+        .tp-template-modal .tp-modal-head { padding: 18px 18px 14px; }
+        .tp-template-modal .tp-modal-body { padding: 14px 14px 20px; }
+        .tp-template-modal .tp-modal-foot { padding: 12px 14px; flex-wrap: wrap; }
+        .tp-message-template-list { padding: 12px; gap: 12px; }
+        .tp-message-template-card { padding: 15px; }
+        .tp-message-template-meta.three { grid-template-columns: 1fr; }
+        .tp-message-template-meta.three label:first-child { grid-column: auto; }
       }
       .tp-report-modal {
         max-width: min(1120px, calc(100vw - 32px));
@@ -4998,7 +5105,7 @@ function Styles() {
       }
       .tp-picker-caret.open { transform: rotate(180deg); }
 
-      /* Inline expanding panel â€” no overflow surprises inside scrollable parents */
+      /* Inline expanding panel — no overflow surprises inside scrollable parents */
       .tp-picker-panel {
         border-top: 1px solid var(--border);
         display: flex;

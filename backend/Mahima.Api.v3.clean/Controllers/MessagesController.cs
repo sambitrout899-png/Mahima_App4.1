@@ -11,12 +11,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Twilio;
-using Twilio.Rest.Api.V2010.Account;
-using Twilio.Types;
 using System.Net;
 using System.Net.Mail;
 using Mahima.Api.v3.clean.Hubs;
+using Mahima.Api.v3.clean.Helpers;
 using Mahima.Api.v3.clean.Models;
 using Mahima.Api.v3.clean.Services;
 using Mahima.Api.v3.clean.Extensions;
@@ -165,6 +163,8 @@ namespace Mahima.Api.v3.clean.Controllers
             public Channels Channels { get; set; } = new();
             public long? TaskId { get; set; }
             public string? Source { get; set; }
+            public string? WhatsAppContentSid { get; set; }
+            public Dictionary<string, string> WhatsAppContentVariables { get; set; } = new();
         }
 
         public class Channels
@@ -217,12 +217,16 @@ public async Task<IActionResult> SendTaskNotification(int taskId)
                 await using var conn = new NpgsqlConnection(connStr);
                 await conn.OpenAsync();
 
+		var tenantId = User.GetTenantIdGuid();
+                if (tenantId == Guid.Empty) return Unauthorized();
+
 		var sql = @"SELECT id, email, phone, displayname
             	FROM public.users
-            	WHERE id::text = ANY(@ids)";	                
+	            	WHERE id::text = ANY(@ids) AND tenant_id = @tenantId";	                
 		
 		await using var cmd = new NpgsqlCommand(sql, conn);
                 cmd.Parameters.AddWithValue("ids", NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Text, req.UserIds.ToArray());
+                cmd.Parameters.AddWithValue("tenantId", tenantId);
 
                 var recipients = new List<(string Id, string? Email, string? Phone, string? DisplayName)>();
                 await using (var rdr = await cmd.ExecuteReaderAsync())
@@ -244,6 +248,11 @@ public async Task<IActionResult> SendTaskNotification(int taskId)
                 if (recipients.Count == 0)
                     return BadRequest("No matching users found for provided userIds.");
 
+                var tenantWhatsAppContentSid = await _db.Tenants.AsNoTracking()
+                    .Where(t => t.Id == tenantId)
+                    .Select(t => t.WhatsAppUserNotificationTemplateSid)
+                    .FirstOrDefaultAsync();
+
                 // SMTP config
                 var smtpHost = _config["Smtp:Host"];
                 var smtpPortParsed = int.TryParse(_config["Smtp:Port"], out var smtpPort) ? smtpPort : 587;
@@ -251,16 +260,12 @@ public async Task<IActionResult> SendTaskNotification(int taskId)
                 var smtpPass = _config["Smtp:Pass"];
                 var smtpFrom = _config["Smtp:From"] ?? smtpUser;
 
-                // Twilio client (if configured) - using configured env is recommended
-                var restClient = new Twilio.Clients.TwilioRestClient(
-                    _config["Twilio:AccountSid"] ?? "AC-fallback",
-                    _config["Twilio:AuthToken"] ?? "fallback"
-                );
-
+                var successfulRecipients = 0;
                 foreach (var r in recipients)
                 {
                     var errors = new List<string>();
                     bool chatOk = false, emailOk = false, smsOk = false, waOk = false;
+                    string? smsMessageSid = null, whatsAppMessageSid = null;
 
                     if (Guid.TryParse(r.Id, out var recipientGuid))
                     {
@@ -323,46 +328,59 @@ public async Task<IActionResult> SendTaskNotification(int taskId)
                     // SMS
                     if (req.Channels.Sms && !string.IsNullOrWhiteSpace(r.Phone))
                     {
-                        try
-                        {
-                            var msg = await MessageResource.CreateAsync(
-                                to: new PhoneNumber(r.Phone),
-                                from: new PhoneNumber(_config["Twilio:FromNumber"] ?? "+14059934588"),
-                                body: "[Mahima SMS] " + req.Message,
-                                client: restClient
-                            );
-
-                            smsOk = true;
-                            _logger.LogInformation("SMS queued. SID: {Sid} To: {To}", msg?.Sid, r.Phone);
-                        }
-                        catch (Exception ex)
-                        {
-                            errors.Add($"SMS failed: {ex.Message}");
-                            _logger.LogError(ex, "SMS send failed to {Phone}", r.Phone);
-                        }
+                        var result = await SmsHelper.SendSmsDetailedAsync(r.Phone, "[Mahima SMS] " + req.Message, _logger);
+                        smsOk = result.Success;
+                        smsMessageSid = result.MessageSid;
+                        if (!result.Success) errors.Add($"SMS failed: {result.ErrorMessage}");
                     }
 
                     // WHATSAPP
                     if (req.Channels.Whatsapp && !string.IsNullOrWhiteSpace(r.Phone))
                     {
-                        try
-                        {
-                            var msg = await MessageResource.CreateAsync(
-                                to: new PhoneNumber($"whatsapp:{r.Phone}"),
-                                from: new PhoneNumber(_config["Twilio:WhatsAppFrom"] ?? "whatsapp:+14155238886"),
-                                body: "[Mahima WA] " + req.Message,
-                                client: restClient
-                            );
+                        SmsSendResult result;
+                        var contentSid = !string.IsNullOrWhiteSpace(req.WhatsAppContentSid)
+                            ? req.WhatsAppContentSid.Trim()
+                            : !string.IsNullOrWhiteSpace(tenantWhatsAppContentSid)
+                                ? tenantWhatsAppContentSid!.Trim()
+                                : TwilioTemplateDefaults.UserNotification;
+                        var publicBase = (_config["Marketing:PublicBaseUrl"] ?? "https://beta.mahimaministries.in").TrimEnd('/');
+                        var statusCallback = $"{publicBase}/api/public/twilio/whatsapp/status";
+                        var normalizedPhone = TwilioWhatsAppWebhookController.NormalizePhone(r.Phone);
+                        var contactState = await _db.WhatsAppContactStates.AsNoTracking()
+                            .SingleOrDefaultAsync(x => x.PhoneE164 == normalizedPhone);
 
-                            waOk = true;
-                            _logger.LogInformation("WA queued. SID: {Sid} To: {To}", msg?.Sid, r.Phone);
-                        }
-                        catch (Exception ex)
+                        if (contactState?.OptedOut == true)
                         {
-                            errors.Add($"WhatsApp failed: {ex.Message}");
-                            _logger.LogError(ex, "WhatsApp send failed to {Phone}", r.Phone);
+                            result = new SmsSendResult(false, null, "Recipient opted out of WhatsApp messages.");
                         }
+                        else
+                        {
+                            // Template sends do not require a locally recorded START or inbound session.
+                            // Preserve explicit opt-outs; Twilio validates template eligibility.
+                            var variables = new Dictionary<string, string>(req.WhatsAppContentVariables ?? new(), StringComparer.OrdinalIgnoreCase);
+                            if (variables.Count == 0)
+                            {
+                                variables["1"] = string.IsNullOrWhiteSpace(r.DisplayName) ? "there" : r.DisplayName;
+                                variables["2"] = req.Message.Trim();
+                            }
+                            result = await SmsHelper.SendWhatsAppTemplateAsync(r.Phone, contentSid, variables, statusCallback, _logger);
+                        }
+
+                        waOk = result.Success;
+                        whatsAppMessageSid = result.MessageSid;
+                        if (!result.Success) errors.Add($"WhatsApp failed: {result.ErrorMessage}");
                     }
+
+                    if (req.Channels.Email && string.IsNullOrWhiteSpace(r.Email))
+                        errors.Add("Email failed: recipient has no email address.");
+                    if ((req.Channels.Sms || req.Channels.Whatsapp) && string.IsNullOrWhiteSpace(r.Phone))
+                        errors.Add("Messaging failed: recipient has no phone number.");
+
+                    var requestedChannelsSucceeded =
+                        (!req.Channels.Email || emailOk) &&
+                        (!req.Channels.Sms || smsOk) &&
+                        (!req.Channels.Whatsapp || waOk);
+                    if (requestedChannelsSucceeded) successfulRecipients++;
 
                     results.Add(new
                     {
@@ -373,7 +391,10 @@ public async Task<IActionResult> SendTaskNotification(int taskId)
                         chatSent = chatOk,
                         emailSent = emailOk,
                         smsSent = smsOk,
+                        smsMessageSid,
                         whatsappSent = waOk,
+                        whatsAppMessageSid,
+                        success = requestedChannelsSucceeded,
                         errors
                     });
                 }
@@ -407,7 +428,14 @@ VALUES (@taskId, @action, @details, @createdById, now());", conn);
                     }
                 }
 
-                return Ok(new { success = true, attempted = recipients.Count, results });
+                return Ok(new
+                {
+                    success = successfulRecipients == recipients.Count,
+                    attempted = recipients.Count,
+                    successful = successfulRecipients,
+                    failed = recipients.Count - successfulRecipients,
+                    results
+                });
             }
             catch (Exception ex)
             {

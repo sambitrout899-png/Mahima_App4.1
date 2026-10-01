@@ -116,8 +116,8 @@ api.interceptors.request.use((config) => {
 /* =========================================================================
  *  Constants & helpers
  * ====================================================================== */
-const STATUSES = ["Present", "Absent", "Leave", "Half-day", "WFH"];
-const ASSIGNABLE_ROLE_NAMES = new Set(["admin", "administrator", "finance", "staff", "volunteer", "volunteers"]);
+const STATUSES = ["Present", "Absent", "Leave (Standard)", "Leave (Medical)", "Leave (Casual)", "Half-day", "WFH", "Weekend"];
+const ASSIGNABLE_ROLE_NAMES = new Set(["admin", "administrator", "finance", "staff", "volunteer", "volunteers", "callcentermanager", "call center manager", "call centre manager"]);
 const ROLE_ID_ALIASES = {
   "1": "admin",
   "10": "volunteer",
@@ -127,9 +127,13 @@ const ROLE_ID_ALIASES = {
 const STATUS_META = {
   present:  { label: "Present",  dot: "bg-emerald-500", chip: "bg-emerald-50 text-emerald-700 border-emerald-200", icon: CheckCircle2, value: 1 },
   absent:   { label: "Absent",   dot: "bg-rose-500",    chip: "bg-rose-50 text-rose-700 border-rose-200",          icon: XCircle,      value: 0 },
-  leave:    { label: "Leave",    dot: "bg-amber-500",   chip: "bg-amber-50 text-amber-700 border-amber-200",        icon: AlertCircle,  value: 0.5 },
+  leave:    { label: "Leave (Standard)", dot: "bg-amber-500", chip: "bg-amber-50 text-amber-700 border-amber-200", icon: AlertCircle, value: 0 },
+  "leave (standard)": { label: "Leave (Standard)", dot: "bg-amber-500", chip: "bg-amber-50 text-amber-700 border-amber-200", icon: AlertCircle, value: 0 },
+  "leave (medical)": { label: "Leave (Medical)", dot: "bg-rose-500", chip: "bg-rose-50 text-rose-700 border-rose-200", icon: AlertCircle, value: 0 },
+  "leave (casual)": { label: "Leave (Casual)", dot: "bg-orange-500", chip: "bg-orange-50 text-orange-700 border-orange-200", icon: AlertCircle, value: 0 },
   "half-day":{ label: "Half-day",dot: "bg-sky-500",     chip: "bg-sky-50 text-sky-700 border-sky-200",              icon: Clock,        value: 0.5 },
   wfh:      { label: "WFH",      dot: "bg-violet-500",  chip: "bg-violet-50 text-violet-700 border-violet-200",     icon: Home,         value: 1 },
+  weekend:  { label: "Weekly off", dot: "bg-slate-400", chip: "bg-slate-50 text-slate-700 border-slate-200", icon: Calendar, value: 0 },
 };
 const statusMeta = (s) => STATUS_META[(s || "").toLowerCase()] || STATUS_META.absent;
 
@@ -291,7 +295,7 @@ function Modal({ open, onClose, title, children, footer, size = "md" }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-2 sm:px-4">
-      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" />
       <div className={`relative w-full ${maxW} bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden max-h-[90vh] flex flex-col`}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
           <h3 className="text-base font-semibold text-slate-900">{title}</h3>
@@ -363,7 +367,7 @@ export default function TimesheetPage() {
   const allRoles = userRoles(user);
   const isAdminRole = allRoles.includes("admin") || allRoles.includes("administrator");
   const isFinanceRole = allRoles.includes("finance");
-  const isStaffRoleSelf = allRoles.includes("staff");
+  const isStaffRoleSelf = allRoles.includes("staff") || allRoles.some((r) => ["callcentermanager", "call center manager", "call centre manager"].includes(r));
   const isAdmin = isAdminRole || isFinanceRole;
   const roleAllows = isAdmin || isStaffRoleSelf;
   const canSee = !!user && roleAllows;
@@ -500,16 +504,20 @@ export default function TimesheetPage() {
     const presentCount = attendance.filter((a) => (a.status || "").toLowerCase() === "present").length;
     const absentCount  = attendance.filter((a) => (a.status || "").toLowerCase() === "absent").length;
     const wfhCount     = attendance.filter((a) => (a.status || "").toLowerCase() === "wfh").length;
-    const leaveCount   = attendance.filter((a) =>
-      ["leave","half-day"].includes((a.status || "").toLowerCase())
-    ).length;
+    const countStatus = (status) => attendance.filter((a) => (a.status || "").toLowerCase() === status).length;
+    const standardLeaveCount = attendance.filter((a) => ["leave", "leave (standard)"].includes((a.status || "").toLowerCase())).length;
+    const medicalLeaveCount = countStatus("leave (medical)");
+    const casualLeaveCount = countStatus("leave (casual)");
+    const leaveCount = standardLeaveCount + medicalLeaveCount + casualLeaveCount;
+    const weekendCount = countStatus("weekend");
     const totalDays = attendance.length;
-    const attendanceRate = totalDays > 0
-      ? Math.round(((presentCount + wfhCount) / totalDays) * 100)
+    const scheduledMarkedDays = Math.max(0, totalDays - weekendCount);
+    const attendanceRate = scheduledMarkedDays > 0
+      ? Math.round(((presentCount + wfhCount) / scheduledMarkedDays) * 100)
       : 0;
     const uniqueDays = new Set(timesheets.map((t) => dayjs(t.date).format("YYYY-MM-DD"))).size;
     const avgHours = uniqueDays > 0 ? (totalHours / uniqueDays).toFixed(1) : "0.0";
-    return { totalHours, presentCount, absentCount, leaveCount, wfhCount, totalDays, attendanceRate, avgHours };
+    return { totalHours, presentCount, absentCount, leaveCount, standardLeaveCount, medicalLeaveCount, casualLeaveCount, weekendCount, wfhCount, totalDays, attendanceRate, avgHours };
   }, [timesheets, attendance]);
 
   /* ---- per-staff summary (admin) ---- */
@@ -531,7 +539,7 @@ export default function TimesheetPage() {
       const s = (a.status || "").toLowerCase();
       if (s === "present")  b.present++;
       else if (s === "absent") b.absent++;
-      else if (s === "leave")  b.leave++;
+      else if (s === "leave" || s.startsWith("leave (")) b.leave++;
       else if (s === "half-day") b.halfDay++;
       else if (s === "wfh")    b.wfh++;
       b.total++;
@@ -1146,11 +1154,14 @@ function OverviewTab({ stats, perStaff, isAdmin, loading }) {
           <ListChecks className="w-4 h-4 text-slate-500" />
           <h3 className="text-sm font-semibold text-slate-800">Status breakdown</h3>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
           {[
             { label: "Present", value: stats.presentCount, bg: "bg-emerald-50/60 border-emerald-100", title: "text-emerald-700", num: "text-emerald-900" },
             { label: "Absent",  value: stats.absentCount,  bg: "bg-rose-50/60 border-rose-100",       title: "text-rose-700",    num: "text-rose-900" },
-            { label: "Leave",   value: stats.leaveCount,   bg: "bg-amber-50/60 border-amber-100",     title: "text-amber-700",   num: "text-amber-900" },
+            { label: "Standard leave", value: stats.standardLeaveCount, bg: "bg-amber-50/60 border-amber-100", title: "text-amber-700", num: "text-amber-900" },
+            { label: "Medical leave", value: stats.medicalLeaveCount, bg: "bg-rose-50/60 border-rose-100", title: "text-rose-700", num: "text-rose-900" },
+            { label: "Casual leave", value: stats.casualLeaveCount, bg: "bg-orange-50/60 border-orange-100", title: "text-orange-700", num: "text-orange-900" },
+            { label: "Weekly off", value: stats.weekendCount, bg: "bg-slate-50/60 border-slate-200", title: "text-slate-600", num: "text-slate-800" },
             { label: "WFH",     value: stats.wfhCount,     bg: "bg-violet-50/60 border-violet-100",   title: "text-violet-700",  num: "text-violet-900" },
             { label: "Total",   value: stats.totalDays,    bg: "bg-slate-50/60 border-slate-100",     title: "text-slate-700",   num: "text-slate-900" },
           ].map((s) => (
@@ -1708,7 +1719,7 @@ function AttModal({ open, onClose, draft, setDraft, staff, isAdmin, onSave, savi
         </div>
         <div className="sm:col-span-2">
           <Label>Status</Label>
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {STATUSES.map((s) => {
               const m = statusMeta(s);
               const Icon = m.icon;
